@@ -1,0 +1,17 @@
+# Local database only. Same PostGIS version we intend to run in Cloud SQL.
+# Nobody develops against a cloud instance.
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    container_name: touchgrass-db
+    environment:
+      POSTGRES_USER: touchgrass
+      POSTGRES_PASSWORD: localdev
+      POSTGRES_DB: touchgrass
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:

@@ -1,0 +1,38 @@
+# dependencies
+node_modules/
+frontend/node_modules/
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+
+# build output
+dist/
+frontend/dist/
+*.egg-info/
+
+# env / secrets — never commit
+.env
+.env.*
+!.env.example
+*service-account*.json
+*.pem
+*.key
+
+# editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# local data & models
+data/
+*.sqlite
+*.db
+weights/
+*.pt
+*.pth
+
+# tool caches
+.ruff_cache/
+.pytest_cache/
