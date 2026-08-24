@@ -11,7 +11,18 @@ export {}
 /* prettier-ignore */
 declare module 'vue' {
   export interface GlobalComponents {
+    AppHeader: typeof import('./components/AppHeader.vue')['default']
+    ElButton: typeof import('element-plus/es')['ElButton']
+    ElDrawer: typeof import('element-plus/es')['ElDrawer']
+    ElIcon: typeof import('element-plus/es')['ElIcon']
+    ElInput: typeof import('element-plus/es')['ElInput']
+    ElTag: typeof import('element-plus/es')['ElTag']
+    FeaturePlaceholder: typeof import('./components/FeaturePlaceholder.vue')['default']
+    GreenPlaceCard: typeof import('./components/GreenPlaceCard.vue')['default']
+    HeroSearch: typeof import('./components/HeroSearch.vue')['default']
+    QuickActionCard: typeof import('./components/QuickActionCard.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
+    StatCard: typeof import('./components/StatCard.vue')['default']
   }
 }
