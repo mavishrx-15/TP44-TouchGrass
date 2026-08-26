@@ -22,7 +22,7 @@ function goHome() {
   <header class="app-header">
     <div class="page-container header-inner">
       <RouterLink class="brand" to="/" aria-label="TouchGrass home" @click="goHome">
-        <span class="brand-mark" aria-hidden="true">⌁</span>
+        <span class="brand-mark" aria-hidden="true" />
         <span>TouchGrass</span>
       </RouterLink>
 
@@ -101,9 +101,6 @@ function goHome() {
   place-items: center;
   border-radius: 9px;
   background: var(--tg-green-700);
-  color: white;
-  font-size: 1.4rem;
-  transform: rotate(-25deg);
 }
 
 .desktop-nav {
