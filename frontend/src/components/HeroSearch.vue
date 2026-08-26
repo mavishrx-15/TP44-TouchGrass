@@ -1,9 +1,24 @@
 <script setup lang="ts">
 import { Location, Search } from '@element-plus/icons-vue'
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 
 const emit = defineEmits<{ explore: [suburb: string] }>()
-const suburb = ref('Kensington')
+const props = defineProps<{ initialValue: string; precincts: string[] }>()
+const suburb = ref(props.initialValue)
+
+watch(
+  () => props.initialValue,
+  (value) => (suburb.value = value),
+)
+
+function suggest(query: string, callback: (items: { value: string }[]) => void) {
+  const normalized = query.trim().toLocaleLowerCase()
+  callback(
+    props.precincts
+      .filter((name) => name.toLocaleLowerCase().includes(normalized))
+      .map((value) => ({ value })),
+  )
+}
 
 function submit() {
   const value = suburb.value.trim()
@@ -28,12 +43,14 @@ function submit() {
 
         <form class="search-form" @submit.prevent="submit">
           <label class="sr-only" for="suburb-search">Enter your suburb</label>
-          <ElInput
+          <ElAutocomplete
             id="suburb-search"
             v-model="suburb"
+            :fetch-suggestions="suggest"
             size="large"
             :prefix-icon="Search"
             placeholder="Enter your suburb"
+            @select="submit"
           />
           <ElButton type="primary" size="large" native-type="submit">Explore My Area</ElButton>
         </form>

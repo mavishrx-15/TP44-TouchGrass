@@ -1,83 +1,58 @@
 <script setup lang="ts">
+import { computed, nextTick } from 'vue'
+import { storeToRefs } from 'pinia'
 import { ElMessage } from 'element-plus'
 import AppHeader from '@/components/AppHeader.vue'
 import GreenPlaceCard from '@/components/GreenPlaceCard.vue'
 import HeroSearch from '@/components/HeroSearch.vue'
 import QuickActionCard from '@/components/QuickActionCard.vue'
 import StatCard from '@/components/StatCard.vue'
+import { useDiscoveryStore } from '@/stores/discovery'
 
-const stats = [
-  { icon: '🌳', value: '1,247', label: 'Nearby Trees', detail: 'Trees mapped within 500m' },
-  { icon: '🏞️', value: '6', label: 'Tree-Dense Zones', detail: 'High-density clusters nearby' },
-  { icon: '🌿', value: '14', label: 'Species Found', detail: 'Distinct species in area' },
+const discovery = useDiscoveryStore()
+const { selectedPrecinct, searchError, snapshot, rankedZones } = storeToRefs(discovery)
+
+const stats = computed(() => [
   {
-    icon: '🩺',
-    value: '4',
-    label: 'Community Reports',
-    detail: 'Tree health reports nearby',
-    neutral: true,
+    icon: '🌳',
+    value: snapshot.value.treeCount.toLocaleString(),
+    label: 'Nearby Trees',
+    detail: `Trees recorded in ${selectedPrecinct.value.name}`,
   },
-]
+  {
+    icon: '▦',
+    value: snapshot.value.zoneCount.toString(),
+    label: 'Tree-Dense Zones',
+    detail: `Mapped clusters in ${selectedPrecinct.value.name}`,
+  },
+  {
+    icon: '♧',
+    value: snapshot.value.speciesCount.toString(),
+    label: 'Species Found',
+    detail: 'Distinct recorded scientific names',
+  },
+])
 
 const actions = [
   {
-    icon: '🗺️',
+    icon: '⌖',
     title: 'Explore Green Map',
-    description: 'See tree canopy, heat spots and green spaces near you.',
+    description: 'See individual trees and tree-density zones near you.',
     to: '/map',
   },
   {
-    icon: '🚶',
+    icon: '↝',
     title: 'Find a Green Path',
-    description: 'Choose a shadier, greener route to your destination.',
-    to: '/map',
-  },
-  {
-    icon: '🔍',
-    title: 'Identify a Tree',
-    description: "Upload a photo and we'll help identify the species.",
-    to: '/identify-tree',
-  },
-  {
-    icon: '🩺',
-    title: 'Report Tree Health',
-    description: 'Help care for local trees by reporting health issues.',
-    to: '/tree-health',
+    description: 'Compare a standard walk with a route passing more trees.',
+    to: '/map?directions=true',
   },
 ]
 
-const places = [
-  {
-    name: 'Royal Park',
-    distance: '1.8 km',
-    trees: '120+',
-    density: 'High density' as const,
-    description:
-      'Native vegetation reserve with walking paths, mapped tree locations and wildlife.',
-    scene: 'park' as const,
-  },
-  {
-    name: 'Riverside Park',
-    distance: '0.8 km',
-    trees: '89+',
-    density: 'High density' as const,
-    description:
-      'A peaceful park along the Maribyrnong with large river red gums and riverside walks.',
-    scene: 'river' as const,
-  },
-  {
-    name: 'Princes Park',
-    distance: '1.2 km',
-    trees: '60+',
-    density: 'Medium density' as const,
-    description:
-      'Formal gardens with a significant heritage tree collection and open green spaces.',
-    scene: 'garden' as const,
-  },
-]
+async function exploreArea(precinctName: string) {
+  if (!discovery.search(precinctName)) return
 
-function exploreArea(suburb: string) {
-  ElMessage.success(`Showing green spaces around ${suburb}`)
+  ElMessage.success(`Showing tree data for ${selectedPrecinct.value.name}`)
+  await nextTick()
   document.querySelector('#neighbourhood')?.scrollIntoView({ behavior: 'smooth' })
 }
 </script>
@@ -85,13 +60,23 @@ function exploreArea(suburb: string) {
 <template>
   <AppHeader />
   <main>
-    <HeroSearch @explore="exploreArea" />
+    <HeroSearch
+      :initial-value="selectedPrecinct.name"
+      :precincts="discovery.precincts.map((precinct) => precinct.name)"
+      @explore="exploreArea"
+    />
+
+    <section v-if="searchError" class="error-section">
+      <div class="page-container">
+        <ElAlert :title="searchError" type="warning" show-icon :closable="false" />
+      </div>
+    </section>
 
     <section id="neighbourhood" class="content-section neighbourhood-section">
       <div class="page-container">
         <div class="section-heading">
-          <h2 class="section-title">Your Neighbourhood — Kensington</h2>
-          <span>Based on City of Melbourne tree location data</span>
+          <h2 class="section-title">Your Neighbourhood — {{ selectedPrecinct.name }}</h2>
+          <span>Mock data shaped for the City of Melbourne tree dataset</span>
         </div>
         <div class="stats-grid">
           <StatCard v-for="stat in stats" :key="stat.label" v-bind="stat" />
@@ -111,24 +96,23 @@ function exploreArea(suburb: string) {
     <section id="places" class="content-section places-section">
       <div class="page-container">
         <div class="places-heading">
-          <h2 class="section-title">Tree-Dense Places Near You</h2>
-          <ElTag round type="success" effect="plain">Sorted by: Tree Density ↓</ElTag>
+          <h2 class="section-title">Tree-Dense Zones Near You</h2>
+          <ElTag round type="success" effect="plain">Sorted by tree count ↓</ElTag>
         </div>
-        <div class="places-grid">
-          <GreenPlaceCard v-for="place in places" :key="place.name" v-bind="place" />
+        <div v-if="rankedZones.length" class="places-grid">
+          <GreenPlaceCard v-for="zone in rankedZones" :key="zone.id" :zone="zone" />
         </div>
+        <ElEmpty v-else description="No tree-density zones were found for this precinct." />
       </div>
     </section>
 
     <section class="tip-section">
       <div class="page-container">
         <div class="green-tip">
-          <span class="tip-icon" aria-hidden="true">🌿</span>
+          <span class="tip-icon" aria-hidden="true">♧</span>
           <div>
             <strong>Today's green tip</strong>
-            <p>
-              Trees can lower local air temperature by up to 8°C — seek mature canopy on hot days.
-            </p>
+            <p>Trees can lower local air temperature — seek mature canopy on hot days.</p>
           </div>
         </div>
       </div>
@@ -137,12 +121,17 @@ function exploreArea(suburb: string) {
 </template>
 
 <style scoped>
+.error-section {
+  padding-top: 24px;
+}
+
 .content-section {
   padding-top: 56px;
 }
 
-.neighbourhood-section {
-  scroll-margin-top: 64px;
+.neighbourhood-section,
+.places-section {
+  scroll-margin-top: 76px;
 }
 
 .section-heading,
@@ -155,7 +144,7 @@ function exploreArea(suburb: string) {
 
 .section-heading > span {
   color: var(--tg-muted);
-  font-size: 0.7rem;
+  font-size: 0.72rem;
 }
 
 .stats-grid,
@@ -167,16 +156,12 @@ function exploreArea(suburb: string) {
 }
 
 .stats-grid,
-.actions-grid {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-}
-
 .places-grid {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
-.places-section {
-  scroll-margin-top: 64px;
+.actions-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .tip-section {
@@ -195,6 +180,7 @@ function exploreArea(suburb: string) {
 }
 
 .tip-icon {
+  color: var(--tg-green-700);
   font-size: 2rem;
 }
 
@@ -211,12 +197,8 @@ function exploreArea(suburb: string) {
   font-size: 0.86rem;
 }
 
-@media (max-width: 920px) {
+@media (max-width: 900px) {
   .stats-grid,
-  .actions-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
   .places-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }

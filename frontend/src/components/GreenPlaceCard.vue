@@ -1,57 +1,47 @@
 <script setup lang="ts">
 import { Location } from '@element-plus/icons-vue'
+import type { TreeZone } from '@/types/discovery'
 
-defineProps<{
-  name: string
-  distance: string
-  trees: string
-  density: 'High density' | 'Medium density'
-  description: string
-  scene: 'park' | 'river' | 'garden'
-}>()
+defineProps<{ zone: TreeZone }>()
 </script>
 
 <template>
-  <article class="place-card">
-    <div
-      class="place-visual"
-      :class="`scene-${scene}`"
-      role="img"
-      :aria-label="`${name} landscape`"
-    >
-      <span class="sun" />
-      <span class="hill hill-back" />
-      <span class="hill hill-front" />
-      <span v-if="scene === 'river'" class="river" />
-    </div>
-    <div class="place-content">
-      <div class="place-heading">
-        <h3>{{ name }}</h3>
-        <ElTag size="small" round type="success" effect="light">{{ distance }}</ElTag>
+  <article class="zone-card">
+    <header class="zone-header" :class="`density-${zone.density.toLowerCase()}`">
+      <div>
+        <span>Tree-dense zone</span>
+        <h3>{{ zone.label }}</h3>
       </div>
-      <div class="place-tags">
-        <ElTag size="small" round type="success" effect="light">🌳 {{ trees }} trees</ElTag>
+      <ElTag round effect="dark" type="success">{{ zone.distanceKm.toFixed(1) }} km away</ElTag>
+    </header>
+
+    <div class="zone-content">
+      <div class="zone-tags">
+        <ElTag size="small" round type="success" effect="light">{{ zone.treeCount }} trees</ElTag>
         <ElTag
           size="small"
           round
-          :type="density === 'High density' ? 'success' : 'warning'"
+          :type="
+            zone.density === 'High' ? 'success' : zone.density === 'Medium' ? 'warning' : 'info'
+          "
           effect="dark"
         >
-          {{ density }}
+          {{ zone.density }} density
         </ElTag>
+        <ElTag size="small" round effect="plain">{{ zone.dominantGenus }}</ElTag>
       </div>
-      <p>{{ description }}</p>
-      <RouterLink to="/map">
-        <ElButton type="primary" size="small" :icon="Location">View on Map</ElButton>
+      <p>{{ zone.description }}</p>
+      <RouterLink :to="{ path: '/map', query: { zone: zone.id } }">
+        <ElButton type="primary" size="small" :icon="Location">View Zone on Map</ElButton>
       </RouterLink>
     </div>
   </article>
 </template>
 
 <style scoped>
-.place-card {
+.zone-card {
   overflow: hidden;
-  border: 1px solid var(--tg-border);
+  border: 1px solid var(--tg-green-300);
   border-radius: 16px;
   background: var(--tg-surface);
   transition:
@@ -59,104 +49,71 @@ defineProps<{
     box-shadow 180ms ease;
 }
 
-.place-card:hover {
+.zone-card:hover {
   box-shadow: var(--tg-shadow);
   transform: translateY(-3px);
 }
 
-.place-visual {
-  position: relative;
-  height: 170px;
-  overflow: hidden;
-  background: linear-gradient(#b9d9c2 0 50%, #729c52 50%);
+.zone-header {
+  display: flex;
+  min-height: 94px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 20px;
+  background: var(--tg-green-800);
+  color: white;
 }
 
-.scene-river {
-  background: linear-gradient(#b9d7d1 0 48%, #6d994f 48%);
+.zone-header.density-medium {
+  background: #559746;
 }
 
-.scene-garden {
-  background: linear-gradient(#d5dfbd 0 48%, #7da05b 48%);
+.zone-header span {
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
 }
 
-.sun {
-  position: absolute;
-  width: 38px;
-  height: 38px;
-  top: 24px;
-  right: 36px;
-  border-radius: 50%;
-  background: rgb(255 241 174 / 82%);
+.zone-header h3 {
+  margin: 8px 0 0;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 1.1rem;
 }
 
-.hill {
-  position: absolute;
-  border-radius: 50% 50% 0 0;
+.zone-header .el-tag {
+  flex: none;
+  border-color: rgb(255 255 255 / 15%);
+  background: rgb(255 255 255 / 16%);
 }
 
-.hill-back {
-  width: 110%;
-  height: 85px;
-  right: -35%;
-  bottom: 20px;
-  background: #527d41;
-  transform: rotate(-7deg);
-}
-
-.hill-front {
-  width: 120%;
-  height: 90px;
-  bottom: -35px;
-  left: -38%;
-  background: #2f6638;
-  transform: rotate(7deg);
-}
-
-.river {
-  position: absolute;
-  z-index: 2;
-  width: 120%;
-  height: 38px;
-  right: -38%;
-  bottom: 4px;
-  border-radius: 50%;
-  background: #7bb8c0;
-  transform: rotate(-10deg);
-}
-
-.place-content {
+.zone-content {
   padding: 20px;
 }
 
-.place-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-h3 {
-  margin: 0;
-  color: var(--tg-green-950);
-  font-size: 1rem;
-}
-
-.place-tags {
+.zone-tags {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  margin-top: 12px;
 }
 
-p {
+.zone-content p {
   min-height: 58px;
-  margin: 13px 0 17px;
+  margin: 14px 0 18px;
   color: var(--tg-muted);
-  font-size: 0.77rem;
-  line-height: 1.55;
+  font-size: 0.78rem;
+  line-height: 1.6;
 }
 
-.el-button {
+.zone-content .el-button {
   font-weight: 700;
+}
+
+@media (max-width: 420px) {
+  .zone-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
 }
 </style>
