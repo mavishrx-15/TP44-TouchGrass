@@ -229,13 +229,18 @@ class Tree(BaseModel):
 
 
 def _bounds(cluster_id: str) -> Bounds:
-    """The 0.001-degree cell a cluster_id names."""
+    """The 0.001-degree cell a cluster_id names.
+
+    Rounded to six decimals — a tenth of a metre, far finer than the grid —
+    because binary floats turn -37.795 - 0.0005 into -37.795500000000004, and
+    neighbouring cells drawn from unrounded edges can show a hairline seam.
+    """
     lat, lng = (float(part) for part in cluster_id.split("_"))
     return Bounds(
-        north=lat + GRID_HALF,
-        south=lat - GRID_HALF,
-        east=lng + GRID_HALF,
-        west=lng - GRID_HALF,
+        north=round(lat + GRID_HALF, 6),
+        south=round(lat - GRID_HALF, 6),
+        east=round(lng + GRID_HALF, 6),
+        west=round(lng - GRID_HALF, 6),
     )
 
 
