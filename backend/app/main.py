@@ -1,7 +1,10 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 
 from app.config import settings
+from app.db import SessionDep
+from app.routers import map_data
 
 app = FastAPI(title="TouchGrass API", version="0.1.0")
 
@@ -19,8 +22,15 @@ def health() -> dict[str, str]:
     return {"status": "ok", "service": "touchgrass-api"}
 
 
-# Feature routers are registered here as they are written, e.g.
-#     from app.routers import routes
-#     app.include_router(routes.router, prefix="/api")
-# The endpoint list is still TBD — it is owned by IT in the tech stack doc,
-# so nothing is invented here.
+@app.get("/api/db-check")
+def db_check(session: SessionDep) -> dict[str, object]:
+    """Proves the API can reach the database, without going through a query.
+
+    Worth keeping past the first real endpoint: when a deployment breaks, this
+    separates "cannot reach the database" from "the SQL is wrong".
+    """
+    result = session.execute(text("SELECT 1")).scalar()
+    return {"db": "connected", "result": result}
+
+
+app.include_router(map_data.router, prefix="/api")
