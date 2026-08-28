@@ -10,9 +10,7 @@ from pathlib import Path
 import psycopg2
 from psycopg2.extras import execute_values
 
-DATA_PATH = (
-    Path(__file__).resolve().parent.parent / "dataset" / "touch_grass_map_data.json"
-)
+DATA_PATH = Path(__file__).resolve().parent.parent / "dataset" / "touch_grass_map_data.json"
 
 
 def main():
