@@ -16,7 +16,21 @@ DATA_PATH = (
 
 
 def main():
-    database_url = os.environ["DATABASE_URL"]
+    # Prefer a single DATABASE_URL. If not provided, fall back to classic
+    # PG* environment variables (PGHOST, PGPORT, PGDATABASE, PGUSER, PGPASSWORD).
+    database_url = os.environ.get("DATABASE_URL")
+    if not database_url:
+        host = os.environ.get("PGHOST", "localhost")
+        port = os.environ.get("PGPORT", "5432")
+        dbname = os.environ.get("PGDATABASE")
+        user = os.environ.get("PGUSER")
+        password = os.environ.get("PGPASSWORD")
+        if not (dbname and user and password):
+            raise RuntimeError(
+                "DATABASE_URL not set and one or more of PGDATABASE/PGUSER/PGPASSWORD missing"
+            )
+        database_url = f"postgresql://{user}:{password}@{host}:{port}/{dbname}"
+
     conn = None
     cur = None
 
