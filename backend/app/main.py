@@ -24,3 +24,8 @@ def health() -> dict[str, str]:
 #     app.include_router(routes.router, prefix="/api")
 # The endpoint list is still TBD — it is owned by IT in the tech stack doc,
 # so nothing is invented here.
+
+# Register ai chat router
+from app.routers import ai_chat
+
+app.include_router(ai_chat.router, prefix="/api/ai")
