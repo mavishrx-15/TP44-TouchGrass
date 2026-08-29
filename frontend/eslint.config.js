@@ -12,7 +12,7 @@ export default ts.config(
   {
     files: ['**/*.{ts,vue}'],
     languageOptions: {
-      globals: globals.browser,
+      globals: { ...globals.browser, google: 'readonly' },
       parserOptions: { parser: ts.parser },
     },
   },
