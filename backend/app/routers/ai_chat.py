@@ -62,21 +62,38 @@ def _call_gemini(prompt: str) -> str:
     if not api_key:
         raise RuntimeError("GEMINI_API_KEY is not set in environment")
 
-    # NOTE: Adjust endpoint/model as your organization requires. This is a commonly used
-    # Generative Language API pattern; you may need to change URL and payload to match
-    # the exact Gemini/Generative API version you are using.
+    # NOTE: This function uses an API key for authentication (GEMINI_API_KEY).
+    # Some Gemini/Vertex endpoints accept the key as a query parameter `?key=API_KEY`.
+    # Adjust the endpoint or auth method if your GCP project requires OAuth/service account.
     url = "https://generativelanguage.googleapis.com/v1beta2/models/text-bison-001:generate"
-    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    params = {"key": api_key}
+    headers = {"Content-Type": "application/json"}
     payload = {"prompt": {"text": prompt}, "maxOutputTokens": 512}
-    resp = requests.post(url, headers=headers, json=payload, timeout=15)
-    resp.raise_for_status()
+
+    try:
+        resp = requests.post(url, params=params, headers=headers, json=payload, timeout=15)
+        resp.raise_for_status()
+    except requests.HTTPError as e:
+        # surface HTTP errors with body for easier debugging
+        body = None
+        try:
+            body = resp.json()
+        except Exception:
+            body = resp.text if resp is not None else None
+        raise RuntimeError(f"Gemini API request failed: {e}; body={body}")
+
     data = resp.json()
     # Response shape may vary by API version; try to extract text in common places.
-    if "candidates" in data and isinstance(data["candidates"], list):
-        return data["candidates"][0].get("content", "").strip()
-    if "output" in data and isinstance(data["output"], dict):
-        # some versions return output.generated_text
-        return data["output"].get("generated_text", "").strip()
+    if isinstance(data, dict):
+        if "candidates" in data and isinstance(data["candidates"], list):
+            return data["candidates"][0].get("content", "").strip()
+        if "output" in data and isinstance(data["output"], dict):
+            return data["output"].get("generated_text", "").strip()
+        # Vertex AI generative may return 'responses' or other keys; try common paths
+        if "responses" in data and isinstance(data["responses"], list) and data["responses"]:
+            first = data["responses"][0]
+            if isinstance(first, dict) and "content" in first:
+                return first.get("content", "").strip()
     # Fallback: stringify whole response
     return str(data)
 
