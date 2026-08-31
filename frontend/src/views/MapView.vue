@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { Close, Location, Refresh, Search } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
@@ -9,7 +9,13 @@ import GoogleMapCanvas from '@/components/GoogleMapCanvas.vue'
 import MapFiltersPanel from '@/components/MapFiltersPanel.vue'
 import RoutePlanner from '@/components/RoutePlanner.vue'
 import { useDiscoveryStore } from '@/stores/discovery'
-import type { RouteOption, TreeRecord, TreeZone } from '@/types/discovery'
+import type {
+  Coordinates,
+  RouteEndpoint,
+  RouteOption,
+  TreeRecord,
+  TreeZone,
+} from '@/types/discovery'
 
 const route = useRoute()
 const discovery = useDiscoveryStore()
@@ -21,39 +27,48 @@ const {
   selectedRouteId,
   densityFilters,
   genusFilters,
-  distanceFilter,
+  loadError,
+  isLoading,
 } = storeToRefs(discovery)
+
+onMounted(() => discovery.initialize())
 
 const mapCanvas = ref<InstanceType<typeof GoogleMapCanvas> | null>(null)
 const searchQuery = ref(selectedPrecinct.value.name)
 const directionsOpen = ref(route.query.directions === 'true')
+const routeDestination = ref<TreeZone | null>(null)
 const mapError = ref<string | null>(null)
 
 const visibleZones = computed(() =>
-  rankedZones.value.filter(
-    (zone) =>
-      densityFilters.value.includes(zone.density) && zone.distanceKm <= distanceFilter.value,
-  ),
+  rankedZones.value.filter((zone) => densityFilters.value.includes(zone.density)),
 )
 
 const visibleTrees = computed(() =>
   discovery.trees.filter(
     (tree) =>
       tree.precinctId === selectedPrecinct.value.id &&
-      tree.distanceKm <= distanceFilter.value &&
       (!genusFilters.value.length || genusFilters.value.includes(tree.genus)),
   ),
 )
 
 const resultCount = computed(() => visibleTrees.value.length + visibleZones.value.length)
 
-function searchMap() {
-  if (!discovery.search(searchQuery.value)) {
-    ElMessage.warning(discovery.searchError ?? 'No matching precinct found')
+async function searchMap() {
+  if (!(await discovery.search(searchQuery.value))) {
+    ElMessage.warning(discovery.searchError ?? discovery.loadError ?? 'No matching precinct found')
     return
   }
   searchQuery.value = selectedPrecinct.value.name
   ElMessage.success(`Map centred on ${selectedPrecinct.value.name}`)
+}
+
+function suggestPrecincts(query: string, callback: (items: { value: string }[]) => void) {
+  const normalized = query.trim().toLocaleLowerCase()
+  callback(
+    discovery.precincts
+      .filter((precinct) => precinct.name.toLocaleLowerCase().includes(normalized))
+      .map((precinct) => ({ value: precinct.name })),
+  )
 }
 
 function selectTree(tree: TreeRecord) {
@@ -66,6 +81,50 @@ function selectZone(zone: TreeZone) {
   selectedTree.value = null
 }
 
+async function openDirections(zone?: TreeZone) {
+  routeDestination.value = zone ?? null
+  directionsOpen.value = true
+  if (zone) {
+    selectedZone.value = zone
+    selectedTree.value = null
+    mapCanvas.value?.focusZone(zone)
+    await planRouteEndpoints(null, zone)
+  }
+}
+
+async function planRouteEndpoints(
+  originEndpoint: RouteEndpoint,
+  destinationEndpoint: RouteEndpoint,
+) {
+  const location = currentLocation()
+  const origin = endpointCoordinates(originEndpoint, location)
+  const destination = endpointCoordinates(destinationEndpoint, location)
+  if (origin.lat === destination.lat && origin.lng === destination.lng) {
+    ElMessage.warning('Origin and destination must be different.')
+    return
+  }
+  if (destinationEndpoint && 'center' in destinationEndpoint) {
+    selectedZone.value = destinationEndpoint
+    mapCanvas.value?.focusZone(destinationEndpoint)
+  }
+  if (!(await discovery.planRoutes(origin, destination))) {
+    ElMessage.error(discovery.routeError ?? 'Routes could not be loaded')
+  }
+}
+
+function endpointCoordinates(endpoint: RouteEndpoint, location: Coordinates): Coordinates {
+  if (!endpoint) return location
+  return 'center' in endpoint ? endpoint.center : endpoint.coordinates
+}
+
+// "My location" is fixed to Melbourne central rather than the device's real
+// position, so route planning stays deterministic across devices/browsers.
+const MELBOURNE_CENTRAL: Coordinates = { lat: -37.8136, lng: 144.9631 }
+
+function currentLocation(): Coordinates {
+  return MELBOURNE_CENTRAL
+}
+
 function closeDetails() {
   selectedTree.value = null
   selectedZone.value = null
@@ -76,8 +135,8 @@ function selectRoute(id: RouteOption['id']) {
 }
 
 watch(
-  () => route.query.zone,
-  (zoneId) => {
+  [() => route.query.zone, rankedZones],
+  ([zoneId]) => {
     if (typeof zoneId !== 'string') return
     const zone = rankedZones.value.find((candidate) => candidate.id === zoneId)
     if (zone) selectZone(zone)
@@ -95,8 +154,9 @@ watch(
         :center="selectedPrecinct.referencePoint"
         :trees="visibleTrees"
         :zones="visibleZones"
-        :directions-open="directionsOpen"
+        :directions-open="directionsOpen && discovery.routeOptions.length > 0"
         :selected-route-id="selectedRouteId"
+        :route-options="discovery.routeOptions"
         @select-tree="selectTree"
         @select-zone="selectZone"
         @error="mapError = $event"
@@ -106,15 +166,27 @@ watch(
         <ElAlert :title="mapError" type="error" show-icon :closable="false" />
       </div>
 
+      <div v-if="loadError" class="map-error">
+        <ElAlert :title="loadError" type="error" show-icon :closable="false" />
+      </div>
+
       <form v-if="!directionsOpen" class="map-search" @submit.prevent="searchMap">
-        <ElInput
+        <ElAutocomplete
           v-model="searchQuery"
+          :fetch-suggestions="suggestPrecincts"
           :prefix-icon="Search"
-          placeholder="Search a Melbourne precinct"
+          placeholder="Search tree-data areas"
           clearable
+          :loading="isLoading"
+          select-when-unmatched
+          @select="searchMap"
         />
-        <ElButton native-type="submit">Search</ElButton>
-        <ElButton type="primary" :icon="Location" @click="directionsOpen = true">
+        <ElButton
+          class="search-submit"
+          type="primary"
+          :icon="Location"
+          @click="openDirections()"
+        >
           Directions
         </ElButton>
       </form>
@@ -122,7 +194,7 @@ watch(
       <MapFiltersPanel
         v-model:densities="densityFilters"
         v-model:genera="genusFilters"
-        v-model:distance="distanceFilter"
+        :genus-options="discovery.availableGenera"
         @reset="discovery.resetFilters"
       />
 
@@ -130,7 +202,12 @@ watch(
         v-if="directionsOpen"
         :options="discovery.routeOptions"
         :selected-id="selectedRouteId"
+        :zones="rankedZones"
+        :initial-destination="routeDestination"
+        :loading="discovery.routesLoading"
+        :error="discovery.routeError"
         @select="selectRoute"
+        @route="planRouteEndpoints"
         @close="directionsOpen = false"
       />
 
@@ -172,10 +249,10 @@ watch(
             </div>
             <div>
               <dt>Dominant genus</dt>
-              <dd>{{ selectedZone.dominantGenus }}</dd>
+              <dd>{{ selectedZone.dominantGenus ?? 'Mixed / other' }}</dd>
             </div>
           </dl>
-          <ElButton type="primary" size="small" @click="directionsOpen = true">
+          <ElButton type="primary" size="small" @click="openDirections(selectedZone)">
             Plan a route here
           </ElButton>
         </template>
@@ -221,7 +298,9 @@ watch(
   top: 22px;
   left: 50%;
   display: flex;
-  width: min(580px, calc(100% - 520px));
+  align-items: center;
+  gap: 16px;
+  width: min(460px, calc(100% - 520px));
   padding: 8px;
   border-radius: 14px;
   background: rgb(255 255 255 / 97%);
@@ -229,8 +308,13 @@ watch(
   transform: translateX(-50%);
 }
 
-.map-search .el-button + .el-button {
-  margin-left: 6px;
+.map-search :deep(.el-autocomplete) {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.map-search .search-submit {
+  flex-shrink: 0;
 }
 
 .detail-card {
@@ -238,10 +322,10 @@ watch(
   z-index: 11;
   right: 22px;
   bottom: 58px;
-  width: 290px;
-  padding: 20px;
+  width: min(390px, calc(100% - 44px));
+  padding: 28px;
   border: 1px solid var(--tg-border);
-  border-radius: 14px;
+  border-radius: 20px;
   background: white;
   box-shadow: 0 10px 30px rgb(31 68 35 / 18%);
 }
@@ -254,7 +338,7 @@ watch(
 
 .detail-eyebrow {
   color: var(--tg-green-700);
-  font-size: 0.62rem;
+  font-size: 0.7rem;
   font-weight: 800;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -264,7 +348,7 @@ watch(
   margin: 8px 24px 4px 0;
   color: var(--tg-green-950);
   font-family: Georgia, 'Times New Roman', serif;
-  font-size: 1.15rem;
+  font-size: 1.65rem;
 }
 
 .detail-card em {
@@ -274,8 +358,8 @@ watch(
 
 .detail-card dl {
   display: grid;
-  gap: 8px;
-  margin: 16px 0;
+  gap: 12px;
+  margin: 20px 0;
 }
 
 .detail-card dl div {
@@ -286,13 +370,13 @@ watch(
 
 .detail-card dt {
   color: var(--tg-muted);
-  font-size: 0.7rem;
+  font-size: 0.8rem;
 }
 
 .detail-card dd {
   margin: 0;
   color: var(--tg-text);
-  font-size: 0.72rem;
+  font-size: 0.82rem;
   font-weight: 700;
   text-align: right;
 }
@@ -301,7 +385,7 @@ watch(
   position: absolute;
   z-index: 8;
   right: 18px;
-  bottom: 18px;
+  bottom: 108px;
   border-color: var(--tg-border);
   box-shadow: 0 4px 14px rgb(31 68 35 / 14%);
 }
@@ -339,10 +423,6 @@ watch(
     top: 10px;
     left: 12px;
     width: calc(100% - 24px);
-  }
-
-  .map-search .el-button:last-child {
-    display: none;
   }
 
   .detail-card {

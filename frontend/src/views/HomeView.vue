@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, nextTick } from 'vue'
+import { computed, onMounted } from 'vue'
 import { storeToRefs } from 'pinia'
-import { ElMessage } from 'element-plus'
+import { useRouter } from 'vue-router'
 import AppHeader from '@/components/AppHeader.vue'
 import GreenPlaceCard from '@/components/GreenPlaceCard.vue'
 import HeroSearch from '@/components/HeroSearch.vue'
@@ -9,8 +9,14 @@ import QuickActionCard from '@/components/QuickActionCard.vue'
 import StatCard from '@/components/StatCard.vue'
 import { useDiscoveryStore } from '@/stores/discovery'
 
+const router = useRouter()
 const discovery = useDiscoveryStore()
-const { selectedPrecinct, searchError, snapshot, rankedZones } = storeToRefs(discovery)
+const { selectedPrecinct, searchError, loadError, isLoading, snapshot, rankedZones } =
+  storeToRefs(discovery)
+
+onMounted(() => discovery.initialize())
+
+const featuredZones = computed(() => rankedZones.value.slice(0, 3))
 
 const stats = computed(() => [
   {
@@ -49,11 +55,8 @@ const actions = [
 ]
 
 async function exploreArea(precinctName: string) {
-  if (!discovery.search(precinctName)) return
-
-  ElMessage.success(`Showing tree data for ${selectedPrecinct.value.name}`)
-  await nextTick()
-  document.querySelector('#neighbourhood')?.scrollIntoView({ behavior: 'smooth' })
+  if (!(await discovery.search(precinctName))) return
+  router.push('/map')
 }
 </script>
 
@@ -72,11 +75,17 @@ async function exploreArea(precinctName: string) {
       </div>
     </section>
 
+    <section v-if="loadError" class="error-section">
+      <div class="page-container">
+        <ElAlert :title="loadError" type="error" show-icon :closable="false" />
+      </div>
+    </section>
+
     <section id="neighbourhood" class="content-section neighbourhood-section">
       <div class="page-container">
         <div class="section-heading">
           <h2 class="section-title">Your Neighbourhood — {{ selectedPrecinct.name }}</h2>
-          <span>Mock data shaped for the City of Melbourne tree dataset</span>
+          <span>City of Melbourne tree data served by the TouchGrass API</span>
         </div>
         <div class="stats-grid">
           <StatCard v-for="stat in stats" :key="stat.label" v-bind="stat" />
@@ -97,12 +106,13 @@ async function exploreArea(precinctName: string) {
       <div class="page-container">
         <div class="places-heading">
           <h2 class="section-title">Tree-Dense Zones Near You</h2>
-          <ElTag round type="success" effect="plain">Sorted by tree count ↓</ElTag>
         </div>
-        <div v-if="rankedZones.length" class="places-grid">
-          <GreenPlaceCard v-for="zone in rankedZones" :key="zone.id" :zone="zone" />
+        <div v-loading="isLoading" class="places-results">
+          <div v-if="featuredZones.length" class="places-grid">
+            <GreenPlaceCard v-for="zone in featuredZones" :key="zone.id" :zone="zone" />
+          </div>
+          <ElEmpty v-else description="No tree-density zones were found for this precinct." />
         </div>
-        <ElEmpty v-else description="No tree-density zones were found for this precinct." />
       </div>
     </section>
 
@@ -153,6 +163,10 @@ async function exploreArea(precinctName: string) {
   display: grid;
   margin-top: 20px;
   gap: 18px;
+}
+
+.places-results {
+  min-height: 180px;
 }
 
 .stats-grid,

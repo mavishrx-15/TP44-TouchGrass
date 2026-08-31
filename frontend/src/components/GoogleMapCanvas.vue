@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { importLibrary, setOptions } from '@googlemaps/js-api-loader'
 import { onBeforeUnmount, onMounted, shallowRef, watch } from 'vue'
-import type { Coordinates, RouteOption, TreeRecord, TreeZone } from '@/types/discovery'
+import type { Coordinates, DensityTier, RouteOption, TreeRecord, TreeZone } from '@/types/discovery'
 
 const props = defineProps<{
   center: Coordinates
@@ -9,6 +9,7 @@ const props = defineProps<{
   zones: TreeZone[]
   directionsOpen: boolean
   selectedRouteId: RouteOption['id']
+  routeOptions: RouteOption[]
 }>()
 
 const emit = defineEmits<{
@@ -33,6 +34,15 @@ const genusColours: Record<TreeRecord['genus'], string> = {
   Casuarina: '#9b8b67',
   Quercus: '#bd62ad',
   Other: '#8c8065',
+}
+
+// ColorBrewer's 3-class "Greens" sequential scale: built for map choropleths,
+// so the three tiers stay distinct without turning neon or muddy on top of
+// the basemap's own colours.
+const densityStyles: Record<DensityTier, { fillColor: string; fillOpacity: number }> = {
+  High: { fillColor: '#006d2c', fillOpacity: 0.55 },
+  Medium: { fillColor: '#31a354', fillOpacity: 0.45 },
+  Low: { fillColor: '#a1d99b', fillOpacity: 0.4 },
 }
 
 function clearMarkers() {
@@ -78,45 +88,18 @@ function renderZones() {
   clearRectangles()
 
   rectangles = props.zones.map((zone) => {
-    const latitudeRadius = 0.00045
-    const longitudeRadius = 0.00057
-    const highDensity = zone.density === 'High'
+    const style = densityStyles[zone.density]
     const rectangle = new google.maps.Rectangle({
       map: map.value,
-      bounds: {
-        north: zone.center.lat + latitudeRadius,
-        south: zone.center.lat - latitudeRadius,
-        east: zone.center.lng + longitudeRadius,
-        west: zone.center.lng - longitudeRadius,
-      },
+      bounds: zone.bounds,
       clickable: true,
-      fillColor: highDensity ? '#1f662f' : '#69ad45',
-      fillOpacity: highDensity ? 0.28 : 0.18,
-      strokeColor: highDensity ? '#164e29' : '#559746',
-      strokeOpacity: 0.65,
-      strokeWeight: 2,
+      fillColor: style.fillColor,
+      fillOpacity: style.fillOpacity,
+      strokeWeight: 0,
     })
     rectangle.addListener('click', () => emit('selectZone', zone))
     return rectangle
   })
-}
-
-function routePath(kind: RouteOption['id']): google.maps.LatLngLiteral[] {
-  const { lat, lng } = props.center
-  if (kind === 'fastest') {
-    return [
-      { lat: lat - 0.006, lng: lng - 0.005 },
-      { lat: lat - 0.002, lng: lng - 0.001 },
-      { lat: lat + 0.001, lng: lng + 0.003 },
-      { lat: lat + 0.005, lng: lng + 0.006 },
-    ]
-  }
-  return [
-    { lat: lat - 0.006, lng: lng - 0.005 },
-    { lat: lat - 0.004, lng: lng + 0.001 },
-    { lat: lat + 0.002, lng: lng + 0.001 },
-    { lat: lat + 0.005, lng: lng + 0.006 },
-  ]
 }
 
 function renderRoutes() {
@@ -124,18 +107,53 @@ function renderRoutes() {
   clearRoutes()
   if (!props.directionsOpen) return
 
-  routeLines = (['fastest', 'green'] as const).map(
-    (id) =>
-      new google.maps.Polyline({
+  const routeBounds = new google.maps.LatLngBounds()
+  routeLines = props.routeOptions
+    .filter((route) => route.encodedPolyline)
+    .map((route) => {
+      const path = decodePolyline(route.encodedPolyline!)
+      path.forEach((point) => routeBounds.extend(point))
+      return new google.maps.Polyline({
         map: map.value!,
-        path: routePath(id),
+        path,
         clickable: false,
-        strokeColor: id === 'green' ? '#247438' : '#347dcc',
-        strokeOpacity: props.selectedRouteId === id ? 0.95 : 0.42,
-        strokeWeight: props.selectedRouteId === id ? 7 : 5,
-        zIndex: props.selectedRouteId === id ? 5 : 4,
-      }),
-  )
+        strokeColor: route.id === 'green' ? '#247438' : '#347dcc',
+        strokeOpacity: props.selectedRouteId === route.id ? 0.95 : 0.42,
+        strokeWeight: props.selectedRouteId === route.id ? 7 : 5,
+        zIndex: props.selectedRouteId === route.id ? 5 : 4,
+      })
+    })
+  if (!routeBounds.isEmpty()) map.value.fitBounds(routeBounds, 90)
+}
+
+function decodePolyline(encoded: string): google.maps.LatLngLiteral[] {
+  const points: google.maps.LatLngLiteral[] = []
+  let index = 0
+  let latitude = 0
+  let longitude = 0
+  while (index < encoded.length) {
+    const latitudeValue = decodeValue(encoded, index)
+    index = latitudeValue.index
+    const longitudeValue = decodeValue(encoded, index)
+    index = longitudeValue.index
+    latitude += latitudeValue.value
+    longitude += longitudeValue.value
+    points.push({ lat: latitude / 100_000, lng: longitude / 100_000 })
+  }
+  return points
+}
+
+function decodeValue(encoded: string, start: number) {
+  let result = 0
+  let shift = 0
+  let index = start
+  let byte: number
+  do {
+    byte = encoded.charCodeAt(index++) - 63
+    result |= (byte & 0x1f) << shift
+    shift += 5
+  } while (byte >= 0x20)
+  return { value: result & 1 ? ~(result >> 1) : result >> 1, index }
 }
 
 function resetView() {
@@ -143,7 +161,11 @@ function resetView() {
   map.value?.setZoom(15)
 }
 
-defineExpose({ resetView })
+function focusZone(zone: TreeZone) {
+  map.value?.fitBounds(zone.bounds, 90)
+}
+
+defineExpose({ resetView, focusZone })
 
 onMounted(async () => {
   const key = import.meta.env.VITE_GOOGLE_MAPS_API_KEY?.trim()
@@ -161,8 +183,14 @@ onMounted(async () => {
       center: props.center,
       zoom: 15,
       mapId: import.meta.env.VITE_GOOGLE_MAP_ID || 'DEMO_MAP_ID',
-      mapTypeControl: false,
-      fullscreenControl: false,
+      mapTypeControl: true,
+      mapTypeControlOptions: {
+        position: google.maps.ControlPosition.TOP_RIGHT,
+        style: google.maps.MapTypeControlStyle.HORIZONTAL_BAR,
+      },
+      fullscreenControl: true,
+      fullscreenControlOptions: { position: google.maps.ControlPosition.TOP_RIGHT },
+      scaleControl: true,
       streetViewControl: false,
       clickableIcons: false,
       gestureHandling: 'greedy',
@@ -184,7 +212,7 @@ watch(
 )
 watch(() => props.trees, renderMarkers, { deep: true })
 watch(() => props.zones, renderZones, { deep: true })
-watch(() => [props.directionsOpen, props.selectedRouteId, props.center], renderRoutes, {
+watch(() => [props.directionsOpen, props.selectedRouteId, props.routeOptions], renderRoutes, {
   deep: true,
 })
 

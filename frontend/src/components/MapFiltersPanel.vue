@@ -1,32 +1,36 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { RefreshLeft } from '@element-plus/icons-vue'
 import type { DensityTier, TreeGenus } from '@/types/discovery'
 
 const densities = defineModel<DensityTier[]>('densities', { required: true })
 const genera = defineModel<TreeGenus[]>('genera', { required: true })
-const distance = defineModel<1 | 3 | 5>('distance', { required: true })
 
 defineEmits<{ reset: [] }>()
 
 const densityOptions: DensityTier[] = ['High', 'Medium', 'Low']
-const genusOptions: TreeGenus[] = [
-  'Eucalyptus',
-  'Acacia',
-  'Ulmus',
-  'Platanus',
-  'Corymbia',
-  'Allocasuarina',
-  'Casuarina',
-  'Quercus',
-  'Other',
-]
+defineProps<{ genusOptions: TreeGenus[] }>()
+
+const allDensitiesOn = computed(() => densities.value.length === densityOptions.length)
+
+function toggleAllDensities() {
+  densities.value = allDensitiesOn.value ? [] : [...densityOptions]
+}
 </script>
 
 <template>
   <aside class="filter-panel" aria-label="Map filters">
     <div class="panel-heading">
       <span>Map filters</span>
-      <strong>Tree Density</strong>
+      <button
+        type="button"
+        class="density-toggle"
+        :class="{ 'is-off': !allDensitiesOn }"
+        :aria-pressed="allDensitiesOn"
+        @click="toggleAllDensities"
+      >
+        Tree Density
+      </button>
     </div>
 
     <div class="filter-group">
@@ -36,15 +40,6 @@ const genusOptions: TreeGenus[] = [
           {{ tier }}
         </ElCheckbox>
       </ElCheckboxGroup>
-    </div>
-
-    <div class="filter-group">
-      <h2>Distance</h2>
-      <ElRadioGroup v-model="distance">
-        <ElRadio :value="1">Under 1 km</ElRadio>
-        <ElRadio :value="3">1–3 km</ElRadio>
-        <ElRadio :value="5">3–5 km</ElRadio>
-      </ElRadioGroup>
     </div>
 
     <div class="filter-group species-group">
@@ -93,12 +88,27 @@ const genusOptions: TreeGenus[] = [
   text-transform: uppercase;
 }
 
-.panel-heading strong {
+.density-toggle {
   padding: 11px 12px;
+  border: 0;
   border-radius: 8px;
   background: var(--tg-green-700);
   color: white;
+  font-family: inherit;
   font-size: 0.78rem;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.density-toggle:hover {
+  background: var(--tg-green-800);
+}
+
+.density-toggle.is-off {
+  background: #c3c9bd;
+  color: var(--tg-muted);
 }
 
 .filter-group {
@@ -110,20 +120,17 @@ const genusOptions: TreeGenus[] = [
   margin-bottom: 9px;
 }
 
-.filter-group :deep(.el-checkbox-group),
-.filter-group :deep(.el-radio-group) {
+.filter-group :deep(.el-checkbox-group) {
   display: grid;
   gap: 2px;
 }
 
-.filter-group :deep(.el-checkbox),
-.filter-group :deep(.el-radio) {
+.filter-group :deep(.el-checkbox) {
   height: 24px;
   margin-right: 0;
 }
 
-.filter-group :deep(.el-checkbox__label),
-.filter-group :deep(.el-radio__label) {
+.filter-group :deep(.el-checkbox__label) {
   display: inline-flex;
   align-items: center;
   padding-left: 7px;

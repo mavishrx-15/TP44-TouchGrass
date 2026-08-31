@@ -50,7 +50,6 @@ function submit() {
             size="large"
             :prefix-icon="Search"
             placeholder="Enter your suburb"
-            @select="submit"
           />
           <ElButton type="primary" size="large" native-type="submit">Explore My Area</ElButton>
         </form>

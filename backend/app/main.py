@@ -4,7 +4,7 @@ from sqlalchemy import text
 
 from app.config import settings
 from app.db import SessionDep
-from app.routers import map_data
+from app.routers import map_data, routes
 
 app = FastAPI(title="TouchGrass API", version="0.1.0")
 
@@ -34,3 +34,4 @@ def db_check(session: SessionDep) -> dict[str, object]:
 
 
 app.include_router(map_data.router, prefix="/api")
+app.include_router(routes.router, prefix="/api")

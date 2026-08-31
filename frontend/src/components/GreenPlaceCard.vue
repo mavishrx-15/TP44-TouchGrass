@@ -28,7 +28,9 @@ defineProps<{ zone: TreeZone }>()
         >
           {{ zone.density }} density
         </ElTag>
-        <ElTag size="small" round effect="plain">{{ zone.dominantGenus }}</ElTag>
+        <ElTag v-if="zone.dominantGenus" size="small" round effect="plain">
+          {{ zone.dominantGenus }}
+        </ElTag>
       </div>
       <p>{{ zone.description }}</p>
       <RouterLink :to="{ path: '/map', query: { zone: zone.id } }">
