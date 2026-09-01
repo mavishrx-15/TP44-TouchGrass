@@ -28,6 +28,7 @@ const initialPrecinct: Precinct = {
 }
 
 export const useDiscoveryStore = defineStore('discovery', () => {
+  // Core map data: trees and zones always belong to the selected precinct.
   const precincts = ref<Precinct[]>([])
   const trees = ref<TreeRecord[]>([])
   const zones = ref<TreeZone[]>([])
@@ -59,6 +60,7 @@ export const useDiscoveryStore = defineStore('discovery', () => {
   )
 
   async function initialize() {
+    // Avoid duplicate startup requests when multiple views mount together.
     if (initialized.value || isLoading.value) return
     isLoading.value = true
     loadError.value = null
@@ -79,6 +81,7 @@ export const useDiscoveryStore = defineStore('discovery', () => {
   }
 
   async function selectPrecinct(precinct: Precinct) {
+    // Commit the precinct only after both requests succeed to keep map data consistent.
     const [loadedZones, loadedTrees] = await Promise.all([
       getPrecinctZones(precinct.id),
       getPrecinctTrees(precinct),

@@ -21,8 +21,6 @@ declare module 'vue' {
     ElEmpty: typeof import('element-plus/es')['ElEmpty']
     ElIcon: typeof import('element-plus/es')['ElIcon']
     ElInput: typeof import('element-plus/es')['ElInput']
-    ElRadio: typeof import('element-plus/es')['ElRadio']
-    ElRadioGroup: typeof import('element-plus/es')['ElRadioGroup']
     ElTag: typeof import('element-plus/es')['ElTag']
     FeaturePlaceholder: typeof import('./components/FeaturePlaceholder.vue')['default']
     GoogleMapCanvas: typeof import('./components/GoogleMapCanvas.vue')['default']

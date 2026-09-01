@@ -46,6 +46,7 @@ const densityStyles: Record<DensityTier, { fillColor: string; fillOpacity: numbe
 }
 
 function clearMarkers() {
+  // Google Maps overlays live outside Vue, so detach them before each redraw.
   markers.forEach((marker) => (marker.map = null))
   markers = []
 }
@@ -107,6 +108,7 @@ function renderRoutes() {
   clearRoutes()
   if (!props.directionsOpen) return
 
+  // Draw every candidate route, then highlight the selected one through styling.
   const routeBounds = new google.maps.LatLngBounds()
   routeLines = props.routeOptions
     .filter((route) => route.encodedPolyline)
@@ -127,6 +129,7 @@ function renderRoutes() {
 }
 
 function decodePolyline(encoded: string): google.maps.LatLngLiteral[] {
+  // Google polylines store signed coordinate deltas rather than full coordinates.
   const points: google.maps.LatLngLiteral[] = []
   let index = 0
   let latitude = 0

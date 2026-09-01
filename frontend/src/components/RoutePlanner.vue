@@ -51,6 +51,7 @@ const filteredZones = computed(() => {
   return props.zones.filter((zone) => zone.label.toLocaleLowerCase().includes(query)).slice(0, 12)
 })
 
+// Wait for typing to pause before querying Google Places.
 watch([activeInput, origin, destination], () => {
   clearTimeout(suggestionTimer)
   placeSuggestions.value = []

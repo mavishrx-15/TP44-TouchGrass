@@ -62,6 +62,7 @@ export async function getPrecinctZones(
     `/api/zones?precinct=${encodeURIComponent(precinctId)}&limit=${limit}`,
     signal,
   )
+  // Add display-only fields here so API responses stay focused on domain data.
   return result.map((zone, index) => ({
     ...zone,
     label: `Zone ${String(index + 1).padStart(2, '0')}`,
@@ -86,6 +87,7 @@ export async function getPrecinctTrees(
 }
 
 function distanceKm(from: Precinct['referencePoint'], to: TreeRecord['coordinates']): number {
+  // Haversine formula: great-circle distance between two coordinates in kilometres.
   const radians = (degrees: number) => (degrees * Math.PI) / 180
   const latitude = radians(to.lat - from.lat)
   const longitude = radians(to.lng - from.lng)
