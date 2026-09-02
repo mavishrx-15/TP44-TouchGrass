@@ -36,6 +36,7 @@ onMounted(() => discovery.initialize())
 const mapCanvas = ref<InstanceType<typeof GoogleMapCanvas> | null>(null)
 const searchQuery = ref(selectedPrecinct.value.name)
 const directionsOpen = ref(route.query.directions === 'true')
+const plannerCollapsed = ref(false)
 const routeDestination = ref<TreeZone | null>(null)
 const mapError = ref<string | null>(null)
 
@@ -84,6 +85,7 @@ function selectZone(zone: TreeZone) {
 async function openDirections(zone?: TreeZone) {
   routeDestination.value = zone ?? null
   directionsOpen.value = true
+  plannerCollapsed.value = false
   if (zone) {
     selectedZone.value = zone
     selectedTree.value = null
@@ -132,6 +134,7 @@ function closeDetails() {
 
 function selectRoute(id: RouteOption['id']) {
   selectedRouteId.value = id
+  plannerCollapsed.value = true
 }
 
 watch(
@@ -206,9 +209,11 @@ watch(
         :initial-destination="routeDestination"
         :loading="discovery.routesLoading"
         :error="discovery.routeError"
+        :collapsed="plannerCollapsed"
         @select="selectRoute"
         @route="planRouteEndpoints"
-        @close="directionsOpen = false"
+        @toggle-collapse="plannerCollapsed = !plannerCollapsed"
+        @close="directionsOpen = false; plannerCollapsed = false"
       />
 
       <section v-if="selectedTree || selectedZone" class="detail-card">

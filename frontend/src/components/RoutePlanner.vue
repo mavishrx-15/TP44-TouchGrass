@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ArrowLeft, Location, Search, Sort } from '@element-plus/icons-vue'
+import { ArrowDown, ArrowLeft, ArrowUp, Location, Search, Sort } from '@element-plus/icons-vue'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { getPlaceDetails, getPlaceSuggestions } from '@/services/discovery.service'
 import type {
@@ -18,16 +18,19 @@ const props = withDefaults(
     initialDestination?: TreeZone | null
     loading?: boolean
     error?: string | null
+    collapsed?: boolean
   }>(),
   {
     options: () => [],
     zones: () => [],
+    collapsed: false,
   },
 )
 const emit = defineEmits<{
   select: [id: RouteOption['id']]
   route: [origin: RouteEndpoint, destination: RouteEndpoint]
   close: []
+  'toggle-collapse': []
 }>()
 
 const origin = ref('My location')
@@ -162,7 +165,26 @@ function requestRoute() {
 </script>
 
 <template>
-  <section class="route-planner" aria-label="Route planner">
+  <section class="route-planner" :class="{ collapsed }" aria-label="Route planner">
+    <button
+      v-if="collapsed"
+      type="button"
+      class="collapsed-bar"
+      @click="emit('toggle-collapse')"
+    >
+      <ElIcon><Location /></ElIcon>
+      <span>{{ destination || 'Directions' }}</span>
+      <ElIcon><ArrowDown /></ElIcon>
+      <ElButton
+        text
+        circle
+        :icon="ArrowLeft"
+        aria-label="Close directions"
+        @click.stop="emit('close')"
+      />
+    </button>
+
+    <template v-else>
     <header class="planner-header">
       <ElButton
         text
@@ -196,6 +218,15 @@ function requestRoute() {
         aria-label="Swap origin and destination"
         :disabled="!origin.trim() || !destination.trim()"
         @click="swapDirection"
+      />
+      <ElButton
+        v-if="!activeInput"
+        class="collapse-toggle"
+        text
+        circle
+        :icon="ArrowUp"
+        aria-label="Hide panel to view the full route"
+        @click="emit('toggle-collapse')"
       />
     </header>
 
@@ -289,6 +320,7 @@ function requestRoute() {
       </div>
       <ElButton class="close-button" text @click="emit('close')">Close directions</ElButton>
     </template>
+    </template>
   </section>
 </template>
 
@@ -307,9 +339,34 @@ function requestRoute() {
   transform: translateX(-50%);
 }
 
+.route-planner.collapsed {
+  width: fit-content;
+  min-width: 220px;
+}
+
+.collapsed-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 10px 10px 16px;
+  border: 0;
+  background: transparent;
+  color: var(--tg-text);
+  font-size: 0.85rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.collapsed-bar span {
+  max-width: 220px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
 .planner-header {
   display: grid;
-  grid-template-columns: 36px minmax(0, 1fr) 42px;
+  grid-template-columns: 36px minmax(0, 1fr) 42px 36px;
   align-items: start;
   gap: 8px;
   padding: 14px;
