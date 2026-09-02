@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
-import { Close, Location, Refresh, Search } from '@element-plus/icons-vue'
+import { Close, Edit, Location, Refresh, Search } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { useRoute } from 'vue-router'
 import AppHeader from '@/components/AppHeader.vue'
@@ -36,6 +36,7 @@ onMounted(() => discovery.initialize())
 const mapCanvas = ref<InstanceType<typeof GoogleMapCanvas> | null>(null)
 const searchQuery = ref(selectedPrecinct.value.name)
 const directionsOpen = ref(route.query.directions === 'true')
+const plannerCollapsed = ref(false)
 const routeDestination = ref<TreeZone | null>(null)
 const mapError = ref<string | null>(null)
 
@@ -52,6 +53,10 @@ const visibleTrees = computed(() =>
 )
 
 const resultCount = computed(() => visibleTrees.value.length + visibleZones.value.length)
+
+const selectedRouteOption = computed(() =>
+  discovery.routeOptions.find((option) => option.id === selectedRouteId.value),
+)
 
 async function searchMap() {
   if (!(await discovery.search(searchQuery.value))) {
@@ -84,6 +89,7 @@ function selectZone(zone: TreeZone) {
 async function openDirections(zone?: TreeZone) {
   routeDestination.value = zone ?? null
   directionsOpen.value = true
+  plannerCollapsed.value = false
   if (zone) {
     selectedZone.value = zone
     selectedTree.value = null
@@ -132,6 +138,14 @@ function closeDetails() {
 
 function selectRoute(id: RouteOption['id']) {
   selectedRouteId.value = id
+  // Selecting a route means the person wants to look at the map, not the
+  // planner card, so tuck the card away while keeping the route rendered.
+  plannerCollapsed.value = true
+}
+
+function closeDirections() {
+  directionsOpen.value = false
+  plannerCollapsed.value = false
 }
 
 watch(
@@ -199,7 +213,7 @@ watch(
       />
 
       <RoutePlanner
-        v-if="directionsOpen"
+        v-if="directionsOpen && !plannerCollapsed"
         :options="discovery.routeOptions"
         :selected-id="selectedRouteId"
         :zones="rankedZones"
@@ -208,8 +222,34 @@ watch(
         :error="discovery.routeError"
         @select="selectRoute"
         @route="planRouteEndpoints"
-        @close="directionsOpen = false"
+        @close="closeDirections"
       />
+
+      <div v-else-if="directionsOpen && plannerCollapsed" class="route-summary">
+        <div class="route-summary-info">
+          <span class="route-summary-icon" aria-hidden="true">
+            {{ selectedRouteOption?.id === 'green' ? '♧' : 'ϟ' }}
+          </span>
+          <span>
+            <strong>{{ selectedRouteOption?.label ?? 'Route selected' }}</strong>
+            <small v-if="selectedRouteOption">
+              {{ selectedRouteOption.durationMinutes }} min ·
+              {{ selectedRouteOption.distanceKm.toFixed(1) }} km ·
+              {{ selectedRouteOption.treeCount }} trees
+            </small>
+          </span>
+        </div>
+        <div class="route-summary-actions">
+          <ElButton text :icon="Edit" @click="plannerCollapsed = false">Edit</ElButton>
+          <ElButton
+            text
+            circle
+            :icon="Close"
+            aria-label="Close directions"
+            @click="closeDirections"
+          />
+        </div>
+      </div>
 
       <section v-if="selectedTree || selectedZone" class="detail-card">
         <ElButton
@@ -317,6 +357,60 @@ watch(
   flex-shrink: 0;
 }
 
+.route-summary {
+  position: absolute;
+  z-index: 12;
+  top: 22px;
+  left: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: min(520px, calc(100% - 500px));
+  padding: 10px 10px 10px 16px;
+  border: 1px solid rgb(23 53 29 / 12%);
+  border-radius: 14px;
+  background: rgb(255 255 255 / 98%);
+  box-shadow: 0 14px 38px rgb(31 68 35 / 20%);
+  transform: translateX(-50%);
+}
+
+.route-summary-info {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+}
+
+.route-summary-icon {
+  color: var(--tg-green-700);
+  font-size: 1.15rem;
+}
+
+.route-summary-info strong,
+.route-summary-info small {
+  display: block;
+}
+
+.route-summary-info strong {
+  color: var(--tg-green-800);
+  font-size: 0.85rem;
+}
+
+.route-summary-info small {
+  margin-top: 2px;
+  color: var(--tg-muted);
+  font-size: 0.68rem;
+  white-space: nowrap;
+}
+
+.route-summary-actions {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 2px;
+}
+
 .detail-card {
   position: absolute;
   z-index: 11;
@@ -411,6 +505,13 @@ watch(
     width: min(480px, calc(100% - 260px));
     transform: none;
   }
+
+  .route-summary {
+    right: 12px;
+    left: auto;
+    width: min(470px, calc(100% - 214px));
+    transform: none;
+  }
 }
 
 @media (max-width: 720px) {
@@ -422,6 +523,12 @@ watch(
   .map-search {
     top: 10px;
     left: 12px;
+    width: calc(100% - 24px);
+  }
+
+  .route-summary {
+    top: 10px;
+    right: 12px;
     width: calc(100% - 24px);
   }
 
