@@ -131,7 +131,7 @@ function closeDetails() {
   selectedTree.value = null
   selectedZone.value = null
 }
-
+//
 function selectRoute(id: RouteOption['id']) {
   selectedRouteId.value = id
   plannerCollapsed.value = true
