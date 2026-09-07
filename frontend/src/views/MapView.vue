@@ -127,6 +127,11 @@ function currentLocation(): Coordinates {
   return MELBOURNE_CENTRAL
 }
 
+function closeDirections() {
+  directionsOpen.value = false
+  plannerCollapsed.value = false
+}
+
 function closeDetails() {
   selectedTree.value = null
   selectedZone.value = null
@@ -208,10 +213,7 @@ watch(
         @select="selectRoute"
         @route="planRouteEndpoints"
         @toggle-collapse="plannerCollapsed = !plannerCollapsed"
-        @close="
-          directionsOpen = false
-          plannerCollapsed = false
-        "
+        @close="closeDirections"
       />
 
       <section v-if="selectedTree || selectedZone" class="detail-card">
