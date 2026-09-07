@@ -3,7 +3,7 @@
 Web app helping residents of low-canopy Melbourne suburbs find and reach tree-dense green
 spaces, using City of Melbourne Urban Forest open data.
 
-Group 44 · Iteration 1 scaffold.
+Group 44 — Iteration 1 scaffold.
 
 ## Layout
 

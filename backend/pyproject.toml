@@ -8,3 +8,9 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+# Tests import the app package from the backend directory, not from an
+# installed distribution.
+pythonpath = ["."]
+testpaths = ["tests"]
