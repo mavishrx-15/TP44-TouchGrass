@@ -184,12 +184,7 @@ watch(
           select-when-unmatched
           @select="searchMap"
         />
-        <ElButton
-          class="search-submit"
-          type="primary"
-          :icon="Location"
-          @click="openDirections()"
-        >
+        <ElButton class="search-submit" type="primary" :icon="Location" @click="openDirections()">
           Directions
         </ElButton>
       </form>
@@ -213,7 +208,10 @@ watch(
         @select="selectRoute"
         @route="planRouteEndpoints"
         @toggle-collapse="plannerCollapsed = !plannerCollapsed"
-        @close="directionsOpen = false; plannerCollapsed = false"
+        @close="
+          directionsOpen = false
+          plannerCollapsed = false
+        "
       />
 
       <section v-if="selectedTree || selectedZone" class="detail-card">

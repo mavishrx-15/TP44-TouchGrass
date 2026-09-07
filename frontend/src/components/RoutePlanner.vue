@@ -166,12 +166,7 @@ function requestRoute() {
 
 <template>
   <section class="route-planner" :class="{ collapsed }" aria-label="Route planner">
-    <button
-      v-if="collapsed"
-      type="button"
-      class="collapsed-bar"
-      @click="emit('toggle-collapse')"
-    >
+    <button v-if="collapsed" type="button" class="collapsed-bar" @click="emit('toggle-collapse')">
       <ElIcon><Location /></ElIcon>
       <span>{{ destination || 'Directions' }}</span>
       <ElIcon><ArrowDown /></ElIcon>
@@ -185,141 +180,141 @@ function requestRoute() {
     </button>
 
     <template v-else>
-    <header class="planner-header">
-      <ElButton
-        text
-        circle
-        :icon="ArrowLeft"
-        aria-label="Close directions"
-        @click="emit('close')"
-      />
-      <div class="route-inputs">
-        <ElInput
-          :model-value="origin"
-          :prefix-icon="Location"
-          placeholder="Choose an origin"
-          clearable
-          @focus="activeInput = 'origin'"
-          @update:model-value="edit('origin', String($event))"
+      <header class="planner-header">
+        <ElButton
+          text
+          circle
+          :icon="ArrowLeft"
+          aria-label="Close directions"
+          @click="emit('close')"
         />
-        <span class="input-connector" aria-hidden="true" />
-        <ElInput
-          :model-value="destination"
-          :prefix-icon="Search"
-          placeholder="Search an area or place"
-          clearable
-          @focus="activeInput = 'destination'"
-          @update:model-value="edit('destination', String($event))"
-        />
-      </div>
-      <ElButton
-        class="swap-button"
-        :icon="Sort"
-        aria-label="Swap origin and destination"
-        :disabled="!origin.trim() || !destination.trim()"
-        @click="swapDirection"
-      />
-      <ElButton
-        v-if="!activeInput"
-        class="collapse-toggle"
-        text
-        circle
-        :icon="ArrowUp"
-        aria-label="Hide panel to view the full route"
-        @click="emit('toggle-collapse')"
-      />
-    </header>
-
-    <div v-if="activeInput" v-loading="placesLoading" class="destination-list">
-      <button type="button" class="destination-item" @click="chooseMyLocation">
-        <span class="destination-icon" aria-hidden="true">◎</span>
-        <span>
-          <strong>My location</strong>
-          <small>Melbourne central</small>
-        </span>
-      </button>
-      <div v-if="filteredZones.length" class="suggestion-section-label">Tree-density zones</div>
-      <button
-        v-for="zone in filteredZones"
-        :key="zone.id"
-        type="button"
-        class="destination-item"
-        @click="chooseZone(zone)"
-      >
-        <span class="destination-icon" aria-hidden="true">●</span>
-        <span>
-          <strong>{{ zone.label }}</strong>
-          <small>
-            Tree-density zone · {{ zone.density }} · {{ zone.distanceKm.toFixed(1) }} km
-          </small>
-        </span>
-        <b>{{ zone.treeCount }} trees</b>
-      </button>
-      <div v-if="placeSuggestions.length" class="suggestion-section-label">Google places</div>
-      <button
-        v-for="place in placeSuggestions"
-        :key="place.id"
-        type="button"
-        class="destination-item"
-        @click="choosePlace(place)"
-      >
-        <span class="destination-icon place-icon" aria-hidden="true">⌖</span>
-        <span>
-          <strong>{{ place.label }}</strong>
-          <small>Google place</small>
-        </span>
-      </button>
-      <p v-if="placesError && activeQuery.length >= 2" class="places-error">
-        {{ placesError }}
-      </p>
-      <ElEmpty
-        v-if="
-          activeQuery.length >= 2 &&
-          !filteredZones.length &&
-          !placeSuggestions.length &&
-          !placesLoading
-        "
-        :image-size="54"
-        description="No matching areas or places"
-      />
-      <p v-if="activeQuery.length < 2 && !filteredZones.length" class="autocomplete-hint">
-        Type at least 2 characters to search Google places.
-      </p>
-    </div>
-
-    <template v-else>
-      <div v-loading="loading ?? false" class="route-results">
-        <ElAlert v-if="error" :title="error" type="error" show-icon :closable="false" />
-        <div v-else class="route-options">
-          <button
-            v-for="option in options"
-            :key="option.id"
-            class="route-option"
-            :class="{ selected: selectedId === option.id }"
-            type="button"
-            @click="emit('select', option.id)"
-          >
-            <span class="route-symbol" aria-hidden="true">{{
-              option.id === 'green' ? '♧' : 'ϟ'
-            }}</span>
-            <span>
-              <strong>{{ option.label }}</strong>
-              <small>
-                {{ option.durationMinutes }} min · {{ option.distanceKm.toFixed(1) }} km ·
-                {{ option.treeCount }} trees
-              </small>
-            </span>
-            <b v-if="selectedId === option.id">Selected</b>
-          </button>
+        <div class="route-inputs">
+          <ElInput
+            :model-value="origin"
+            :prefix-icon="Location"
+            placeholder="Choose an origin"
+            clearable
+            @focus="activeInput = 'origin'"
+            @update:model-value="edit('origin', String($event))"
+          />
+          <span class="input-connector" aria-hidden="true" />
+          <ElInput
+            :model-value="destination"
+            :prefix-icon="Search"
+            placeholder="Search an area or place"
+            clearable
+            @focus="activeInput = 'destination'"
+            @update:model-value="edit('destination', String($event))"
+          />
         </div>
+        <ElButton
+          class="swap-button"
+          :icon="Sort"
+          aria-label="Swap origin and destination"
+          :disabled="!origin.trim() || !destination.trim()"
+          @click="swapDirection"
+        />
+        <ElButton
+          v-if="!activeInput"
+          class="collapse-toggle"
+          text
+          circle
+          :icon="ArrowUp"
+          aria-label="Hide panel to view the full route"
+          @click="emit('toggle-collapse')"
+        />
+      </header>
 
-        <p v-if="!error && fastest && green" class="comparison">
-          Green Path passes {{ green.treeCount - fastest.treeCount }} more trees, only
-          {{ green.durationMinutes - fastest.durationMinutes }} min longer.
+      <div v-if="activeInput" v-loading="placesLoading" class="destination-list">
+        <button type="button" class="destination-item" @click="chooseMyLocation">
+          <span class="destination-icon" aria-hidden="true">◎</span>
+          <span>
+            <strong>My location</strong>
+            <small>Melbourne central</small>
+          </span>
+        </button>
+        <div v-if="filteredZones.length" class="suggestion-section-label">Tree-density zones</div>
+        <button
+          v-for="zone in filteredZones"
+          :key="zone.id"
+          type="button"
+          class="destination-item"
+          @click="chooseZone(zone)"
+        >
+          <span class="destination-icon" aria-hidden="true">●</span>
+          <span>
+            <strong>{{ zone.label }}</strong>
+            <small>
+              Tree-density zone · {{ zone.density }} · {{ zone.distanceKm.toFixed(1) }} km
+            </small>
+          </span>
+          <b>{{ zone.treeCount }} trees</b>
+        </button>
+        <div v-if="placeSuggestions.length" class="suggestion-section-label">Google places</div>
+        <button
+          v-for="place in placeSuggestions"
+          :key="place.id"
+          type="button"
+          class="destination-item"
+          @click="choosePlace(place)"
+        >
+          <span class="destination-icon place-icon" aria-hidden="true">⌖</span>
+          <span>
+            <strong>{{ place.label }}</strong>
+            <small>Google place</small>
+          </span>
+        </button>
+        <p v-if="placesError && activeQuery.length >= 2" class="places-error">
+          {{ placesError }}
+        </p>
+        <ElEmpty
+          v-if="
+            activeQuery.length >= 2 &&
+            !filteredZones.length &&
+            !placeSuggestions.length &&
+            !placesLoading
+          "
+          :image-size="54"
+          description="No matching areas or places"
+        />
+        <p v-if="activeQuery.length < 2 && !filteredZones.length" class="autocomplete-hint">
+          Type at least 2 characters to search Google places.
         </p>
       </div>
-      <ElButton class="close-button" text @click="emit('close')">Close directions</ElButton>
-    </template>
+
+      <template v-else>
+        <div v-loading="loading ?? false" class="route-results">
+          <ElAlert v-if="error" :title="error" type="error" show-icon :closable="false" />
+          <div v-else class="route-options">
+            <button
+              v-for="option in options"
+              :key="option.id"
+              class="route-option"
+              :class="{ selected: selectedId === option.id }"
+              type="button"
+              @click="emit('select', option.id)"
+            >
+              <span class="route-symbol" aria-hidden="true">{{
+                option.id === 'green' ? '♧' : 'ϟ'
+              }}</span>
+              <span>
+                <strong>{{ option.label }}</strong>
+                <small>
+                  {{ option.durationMinutes }} min · {{ option.distanceKm.toFixed(1) }} km ·
+                  {{ option.treeCount }} trees
+                </small>
+              </span>
+              <b v-if="selectedId === option.id">Selected</b>
+            </button>
+          </div>
+
+          <p v-if="!error && fastest && green" class="comparison">
+            Green Path passes {{ green.treeCount - fastest.treeCount }} more trees, only
+            {{ green.durationMinutes - fastest.durationMinutes }} min longer.
+          </p>
+        </div>
+        <ElButton class="close-button" text @click="emit('close')">Close directions</ElButton>
+      </template>
     </template>
   </section>
 </template>
