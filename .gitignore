@@ -40,3 +40,4 @@ weights/
 # course governance documents — submitted via Moodle/Drive, not the repo
 (TouchGrass) Project Governance Portfolio*
 figma/
+.firebase/
