@@ -92,7 +92,8 @@ def place_details(place_id: str) -> PlaceDetails:
 
 @router.post("/routes", response_model=list[RouteResult])
 def walking_routes(request: RouteRequest, session: SessionDep) -> list[RouteResult]:
-    """Return Google's fastest walk and the alternative passing most zone trees."""
+    """Return the fastest route and, when a different alternative passes more
+    zone trees, a second "green" option scored the same way."""
     if not settings.google_maps_api_key:
         raise HTTPException(status_code=503, detail="Google Routes API key is not configured.")
 
@@ -137,14 +138,11 @@ def walking_routes(request: RouteRequest, session: SessionDep) -> list[RouteResu
         for item in candidates
     ]
     fastest = min(scored, key=lambda candidate: _duration_seconds(candidate[1]["duration"]))
-    alternatives = [candidate for candidate in scored if candidate[1] is not fastest[1]]
-    green = max(
-        alternatives or [fastest],
-        key=lambda candidate: (candidate[0], -_duration_seconds(candidate[1]["duration"])),
-    )
+    greenest = max(scored, key=lambda candidate: candidate[0])
+
     results = [_result("fastest", "Fastest Route", fastest)]
-    if green[1] is not fastest[1]:
-        results.append(_result("green", "Tree-Dense Route", green))
+    if greenest[1] is not fastest[1]:
+        results.append(_result("green", "Green Path", greenest))
     return results
 
 

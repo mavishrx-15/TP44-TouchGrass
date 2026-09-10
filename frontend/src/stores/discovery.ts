@@ -46,6 +46,12 @@ export const useDiscoveryStore = defineStore('discovery', () => {
   const routeError = ref<string | null>(null)
   const densityFilters = ref<DensityTier[]>(['High', 'Medium', 'Low'])
   const genusFilters = ref<TreeGenus[]>([])
+  // Where the person actually is (geolocation) or typed in (a geocoded
+  // address), set once onboarding's location step resolves. Distinct from
+  // selectedPrecinct.referencePoint, which is a fixed property of the
+  // dataset and was never meant to double as "where the user is standing".
+  const startLocation = ref<Coordinates | null>(null)
+  const startLocationLabel = ref('')
 
   const snapshot = computed(() => ({
     treeCount: selectedPrecinct.value.treeCount,
@@ -135,6 +141,43 @@ export const useDiscoveryStore = defineStore('discovery', () => {
     genusFilters.value = []
   }
 
+  /**
+   * Called once onboarding's location step resolves a coordinate (either
+   * geolocation or a geocoded address). The backend still serves zones per
+   * precinct (see map_data.py's API contract), so this loads whichever
+   * precinct's reference point is closest to the person, then records the
+   * exact point so the map can centre on it instead of that precinct's
+   * (coarser) reference point.
+   */
+  async function focusOnLocation(coordinates: Coordinates, label: string) {
+    if (!initialized.value) await initialize()
+    startLocation.value = coordinates
+    startLocationLabel.value = label
+    const nearest = nearestPrecinct(coordinates)
+    if (nearest && nearest.id !== selectedPrecinct.value.id) {
+      await selectPrecinct(nearest)
+    }
+  }
+
+  function nearestPrecinct(point: Coordinates): Precinct | undefined {
+    if (!precincts.value.length) return undefined
+    return precincts.value.reduce((closest, candidate) =>
+      haversineKm(point, candidate.referencePoint) < haversineKm(point, closest.referencePoint)
+        ? candidate
+        : closest,
+    )
+  }
+
+  function haversineKm(from: Coordinates, to: Coordinates): number {
+    const radians = (degrees: number) => (degrees * Math.PI) / 180
+    const latitude = radians(to.lat - from.lat)
+    const longitude = radians(to.lng - from.lng)
+    const value =
+      Math.sin(latitude / 2) ** 2 +
+      Math.cos(radians(from.lat)) * Math.cos(radians(to.lat)) * Math.sin(longitude / 2) ** 2
+    return 2 * 6371 * Math.asin(Math.sqrt(value))
+  }
+
   function apiErrorMessage(error: unknown) {
     const detail = error instanceof Error ? error.message : 'Unknown error'
     return `Tree data could not be loaded from the API. Check that the backend is running. (${detail})`
@@ -159,11 +202,14 @@ export const useDiscoveryStore = defineStore('discovery', () => {
     selectedRoute,
     densityFilters,
     genusFilters,
+    startLocation,
+    startLocationLabel,
     snapshot,
     rankedZones,
     initialize,
     search,
     planRoutes,
     resetFilters,
+    focusOnLocation,
   }
 })

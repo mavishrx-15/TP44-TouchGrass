@@ -3,14 +3,18 @@ import { importLibrary, setOptions } from '@googlemaps/js-api-loader'
 import { onBeforeUnmount, onMounted, shallowRef, watch } from 'vue'
 import type { Coordinates, DensityTier, RouteOption, TreeRecord, TreeZone } from '@/types/discovery'
 
-const props = defineProps<{
-  center: Coordinates
-  trees: TreeRecord[]
-  zones: TreeZone[]
-  directionsOpen: boolean
-  selectedRouteId: RouteOption['id']
-  routeOptions: RouteOption[]
-}>()
+const props = withDefaults(
+  defineProps<{
+    center: Coordinates
+    zoom?: number
+    trees: TreeRecord[]
+    zones: TreeZone[]
+    directionsOpen: boolean
+    selectedRouteId: RouteOption['id']
+    routeOptions: RouteOption[]
+  }>(),
+  { zoom: 15 },
+)
 
 const emit = defineEmits<{
   selectTree: [tree: TreeRecord]
@@ -161,7 +165,7 @@ function decodeValue(encoded: string, start: number) {
 
 function resetView() {
   map.value?.setCenter(props.center)
-  map.value?.setZoom(15)
+  map.value?.setZoom(props.zoom)
 }
 
 function focusZone(zone: TreeZone) {
@@ -184,7 +188,7 @@ onMounted(async () => {
 
     map.value = new Map(mapElement.value, {
       center: props.center,
-      zoom: 15,
+      zoom: props.zoom,
       mapId: import.meta.env.VITE_GOOGLE_MAP_ID || 'DEMO_MAP_ID',
       mapTypeControl: true,
       mapTypeControlOptions: {

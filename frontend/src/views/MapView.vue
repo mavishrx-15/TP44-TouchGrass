@@ -29,6 +29,8 @@ const {
   genusFilters,
   loadError,
   isLoading,
+  startLocation,
+  startLocationLabel,
 } = storeToRefs(discovery)
 
 onMounted(() => discovery.initialize())
@@ -53,6 +55,13 @@ const visibleTrees = computed(() =>
 )
 
 const resultCount = computed(() => visibleTrees.value.length + visibleZones.value.length)
+
+// Centre on exactly where the person said they're starting from (onboarding's
+// "use my location" / "enter a location" step) rather than the precinct's
+// reference point, which is a dataset property, not a real position. Zoom in
+// closer for a specific point than for the wider precinct default.
+const mapCenter = computed(() => startLocation.value ?? selectedPrecinct.value.referencePoint)
+const mapZoom = computed(() => (startLocation.value ? 16 : 15))
 
 async function searchMap() {
   if (!(await discovery.search(searchQuery.value))) {
@@ -119,12 +128,12 @@ function endpointCoordinates(endpoint: RouteEndpoint, location: Coordinates): Co
   return 'center' in endpoint ? endpoint.center : endpoint.coordinates
 }
 
-// "My location" is fixed to Melbourne central rather than the device's real
-// position, so route planning stays deterministic across devices/browsers.
-const MELBOURNE_CENTRAL: Coordinates = { lat: -37.8136, lng: 144.9631 }
-
+// "My location" for route planning is whatever onboarding resolved (device
+// geolocation or a geocoded address); if someone lands on /map without going
+// through onboarding, fall back to the loaded precinct's reference point
+// rather than a hard-coded Melbourne CBD point.
 function currentLocation(): Coordinates {
-  return MELBOURNE_CENTRAL
+  return startLocation.value ?? selectedPrecinct.value.referencePoint
 }
 
 function closeDetails() {
@@ -154,7 +163,8 @@ watch(
     <div class="map-canvas">
       <GoogleMapCanvas
         ref="mapCanvas"
-        :center="selectedPrecinct.referencePoint"
+        :center="mapCenter"
+        :zoom="mapZoom"
         :trees="visibleTrees"
         :zones="visibleZones"
         :directions-open="directionsOpen && discovery.routeOptions.length > 0"
@@ -268,7 +278,7 @@ watch(
       </ElButton>
 
       <div class="map-status" role="status">
-        {{ selectedPrecinct.name }} · {{ resultCount }} visible features
+        {{ startLocationLabel || selectedPrecinct.name }} · {{ resultCount }} visible features
       </div>
     </div>
   </main>
