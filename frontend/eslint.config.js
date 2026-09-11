@@ -10,6 +10,10 @@ export default ts.config(
   ...ts.configs.recommended,
   ...pluginVue.configs['flat/essential'],
   {
+    files: ['middleware.js', 'tests/**/*.js'],
+    languageOptions: { globals: globals.node },
+  },
+  {
     files: ['**/*.{ts,vue}'],
     languageOptions: {
       globals: { ...globals.browser, google: 'readonly' },
