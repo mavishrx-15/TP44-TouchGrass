@@ -55,6 +55,17 @@ describe('shared preference matching', () => {
     expect(result.matches[0]?.matched).toBe(false)
     expect(result.matches[0]?.detail).toContain('not yet confirmed')
   })
+  it('never calls partial shade or medium canopy a match for the high preference', () => {
+    const result = scorePreferences(
+      { ...metrics, canopy: 0.58, parkShare: 0.6 },
+      { ...emptyPreferences(), canopy: 60, shade: 85 },
+      11,
+    )
+    expect(result.matches).toMatchObject([
+      { key: 'canopy', detail: 'Medium tree canopy', matched: false },
+      { key: 'shade', detail: 'Partial shade', matched: false },
+    ])
+  })
   it('handles time tolerance and the open-ended 20+ option', () => {
     expect(withinBudget(17, 15)).toBe(true)
     expect(withinBudget(18, 15)).toBe(false)

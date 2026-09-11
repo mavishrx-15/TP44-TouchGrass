@@ -15,6 +15,12 @@ export const shadeLabel = (share: number) =>
 export const noiseLabel = (share: number) =>
   share >= 0.65 ? 'Mostly park-side' : share >= 0.35 ? 'Mixed street/park' : 'Mostly street-side'
 
+function levelMatches(value: number, preference: number, low: number, high: number) {
+  if (preference >= 60) return value >= high
+  if (preference <= 35) return value < low
+  return value >= low && value < high
+}
+
 export function preferenceChips(p: Preferences): string[] {
   return [
     p.canopy === null
@@ -82,6 +88,7 @@ export function scorePreferences(
       })[0]!,
       `${canopyLabel(metrics.canopy)} tree canopy`,
       value,
+      levelMatches(metrics.canopy, preferences.canopy, 0.4, 0.75),
     )
   }
   if (preferences.shade !== null) {
@@ -94,6 +101,7 @@ export function scorePreferences(
           : 'Balanced shade',
       shadeLabel(metrics.parkShare),
       1 - Math.abs(metrics.parkShare - preferences.shade / 100),
+      levelMatches(metrics.parkShare, preferences.shade, 0.35, 0.65),
     )
   }
   if (preferences.noise !== null) {
@@ -102,6 +110,7 @@ export function scorePreferences(
       preferences.noise === 'quiet' ? 'Quieter surroundings' : 'Lively atmosphere',
       noiseLabel(metrics.parkShare),
       preferences.noise === 'quiet' ? metrics.parkShare : 1 - metrics.parkShare,
+      preferences.noise === 'quiet' ? metrics.parkShare >= 0.65 : metrics.parkShare < 0.35,
     )
   }
   if (preferences.allergy !== null) {

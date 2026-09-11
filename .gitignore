@@ -41,3 +41,5 @@ weights/
 (TouchGrass) Project Governance Portfolio*
 figma/
 .firebase/
+frontend/test-results/
+frontend/playwright-report/
