@@ -157,7 +157,8 @@ function renderRoutes() {
         zIndex: 5,
       })
     })
-  if (!routeBounds.isEmpty()) map.value.fitBounds(routeBounds, { top: 230, bottom: 40, left: 35, right: 35 })
+  if (!routeBounds.isEmpty())
+    map.value.fitBounds(routeBounds, { top: 230, bottom: 40, left: 35, right: 35 })
 }
 
 async function renderEndpoints() {
