@@ -9,13 +9,7 @@ import GoogleMapCanvas from '@/components/GoogleMapCanvas.vue'
 import MapFiltersPanel from '@/components/MapFiltersPanel.vue'
 import RoutePlanner from '@/components/RoutePlanner.vue'
 import { useDiscoveryStore } from '@/stores/discovery'
-import type {
-  Coordinates,
-  RouteEndpoint,
-  RouteOption,
-  TreeRecord,
-  TreeZone,
-} from '@/types/discovery'
+import type { Coordinates, RouteEndpoint, TreeRecord, TreeZone } from '@/types/discovery'
 
 const route = useRoute()
 const discovery = useDiscoveryStore()
@@ -24,7 +18,6 @@ const {
   rankedZones,
   selectedTree,
   selectedZone,
-  selectedRouteId,
   densityFilters,
   genusFilters,
   loadError,
@@ -137,8 +130,7 @@ function closeDetails() {
   selectedZone.value = null
 }
 //
-function selectRoute(id: RouteOption['id']) {
-  selectedRouteId.value = id
+function selectRoute() {
   plannerCollapsed.value = true
 }
 
@@ -163,7 +155,6 @@ watch(
         :trees="visibleTrees"
         :zones="visibleZones"
         :directions-open="directionsOpen && discovery.routeOptions.length > 0"
-        :selected-route-id="selectedRouteId"
         :route-options="discovery.routeOptions"
         @select-tree="selectTree"
         @select-zone="selectZone"
@@ -204,7 +195,6 @@ watch(
       <RoutePlanner
         v-if="directionsOpen"
         :options="discovery.routeOptions"
-        :selected-id="selectedRouteId"
         :zones="rankedZones"
         :initial-destination="routeDestination"
         :loading="discovery.routesLoading"

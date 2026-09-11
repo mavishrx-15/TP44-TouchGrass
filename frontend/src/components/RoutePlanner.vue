@@ -13,7 +13,6 @@ import type {
 const props = withDefaults(
   defineProps<{
     options?: RouteOption[]
-    selectedId: RouteOption['id']
     zones?: TreeZone[]
     initialDestination?: TreeZone | null
     loading?: boolean
@@ -43,8 +42,6 @@ const placesLoading = ref(false)
 const placesError = ref<string | null>(null)
 let suggestionTimer: ReturnType<typeof setTimeout> | undefined
 
-const fastest = computed(() => props.options.find((route) => route.id === 'fastest'))
-const green = computed(() => props.options.find((route) => route.id === 'green'))
 const activeQuery = computed(() =>
   (activeInput.value === 'origin' ? origin.value : destination.value).trim(),
 )
@@ -290,13 +287,11 @@ function requestRoute() {
               v-for="option in options"
               :key="option.id"
               class="route-option"
-              :class="{ selected: selectedId === option.id }"
+              :class="{ selected: true }"
               type="button"
               @click="emit('select', option.id)"
             >
-              <span class="route-symbol" aria-hidden="true">{{
-                option.id === 'green' ? '♧' : 'ϟ'
-              }}</span>
+              <span class="route-symbol" aria-hidden="true">♧</span>
               <span>
                 <strong>{{ option.label }}</strong>
                 <small>
@@ -304,14 +299,8 @@ function requestRoute() {
                   {{ option.treeCount }} trees
                 </small>
               </span>
-              <b v-if="selectedId === option.id">Selected</b>
             </button>
           </div>
-
-          <p v-if="!error && fastest && green" class="comparison">
-            Green Path passes {{ green.treeCount - fastest.treeCount }} more trees, only
-            {{ green.durationMinutes - fastest.durationMinutes }} min longer.
-          </p>
         </div>
         <ElButton class="close-button" text @click="emit('close')">Close directions</ElButton>
       </template>

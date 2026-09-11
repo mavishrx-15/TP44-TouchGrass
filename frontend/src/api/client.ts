@@ -1,3 +1,5 @@
+import { getAccessToken } from '@/services/access.service'
+
 const BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080'
 
 type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE'
@@ -26,6 +28,9 @@ export class ApiError extends Error {
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const method = options.method ?? 'GET'
   const headers: HeadersInit = { Accept: 'application/json' }
+  const token = getAccessToken()
+  if (token && !token.startsWith('demo-') && path !== '/api/access/verify')
+    headers.Authorization = `Bearer ${token}`
 
   if (options.body !== undefined) {
     headers['Content-Type'] = 'application/json'
@@ -39,6 +44,10 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
   })
 
   if (!response.ok) {
+    if (response.status === 401 && path !== '/api/access/verify') {
+      sessionStorage.removeItem('touchgrass.access.v1')
+      window.dispatchEvent(new Event('touchgrass:access-expired'))
+    }
     const contentType = response.headers.get('content-type')
     const detail = contentType?.includes('application/json')
       ? await response.json().catch(() => undefined)

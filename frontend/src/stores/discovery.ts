@@ -41,7 +41,6 @@ export const useDiscoveryStore = defineStore('discovery', () => {
   const selectedTree = ref<TreeRecord | null>(null)
   const selectedZone = ref<TreeZone | null>(null)
   const routeOptions = ref<RouteOption[]>([])
-  const selectedRouteId = ref<RouteOption['id']>('fastest')
   const routesLoading = ref(false)
   const routeError = ref<string | null>(null)
   const densityFilters = ref<DensityTier[]>(['High', 'Medium', 'Low'])
@@ -53,11 +52,7 @@ export const useDiscoveryStore = defineStore('discovery', () => {
     speciesCount: selectedPrecinct.value.speciesCount,
   }))
   const rankedZones = computed(() => zones.value)
-  const selectedRoute = computed(
-    () =>
-      routeOptions.value.find((route) => route.id === selectedRouteId.value) ??
-      routeOptions.value[0],
-  )
+  const selectedRoute = computed(() => routeOptions.value[0])
 
   async function initialize() {
     // Avoid duplicate startup requests when multiple views mount together.
@@ -119,7 +114,6 @@ export const useDiscoveryStore = defineStore('discovery', () => {
     routeError.value = null
     try {
       routeOptions.value = await getWalkingRoutes(origin, destination)
-      selectedRouteId.value = 'fastest'
       return true
     } catch (error) {
       routeOptions.value = []
@@ -155,7 +149,6 @@ export const useDiscoveryStore = defineStore('discovery', () => {
     initialized,
     selectedTree,
     selectedZone,
-    selectedRouteId,
     selectedRoute,
     densityFilters,
     genusFilters,
