@@ -18,6 +18,10 @@ from app.routers.routes import (
 )
 
 
+def _corridor(trees: int, park: int = 0, high_pollen: int = 0, canopy: int = 0) -> Corridor:
+    return Corridor(trees=trees, park=park, high_pollen=high_pollen, canopy=canopy)
+
+
 def _candidate(seconds: int, metres: int = 900) -> dict:
     return {
         "duration": f"{seconds}s",
@@ -34,57 +38,61 @@ def test_the_leafiest_candidate_wins_not_the_quickest():
 
     Picking between them is now this function's whole job.
     """
-    quick = (Corridor(trees=10, park=0), _candidate(600))
-    leafy = (Corridor(trees=95, park=0), _candidate(780))
+    quick = (_corridor(10, canopy=20), _candidate(600))
+    leafy = (_corridor(95, canopy=88), _candidate(780))
     assert _best([quick, leafy]) is leafy
 
 
-def test_density_is_per_kilometre_so_a_detour_cannot_win_on_length():
-    """Twice the trees over three times the distance is a thinner walk.
+def test_a_longer_route_cannot_win_by_passing_more_trees():
+    """Ranking on a percentile keeps length out of the comparison.
 
-    Ranking on the raw count would reward the long way round for being long.
+    The detour passes twice the trees over three times the distance — more
+    trees, no leafier. A raw total would reward it for being long.
     """
-    short = (Corridor(trees=100, park=0), _candidate(600, metres=500))
-    detour = (Corridor(trees=200, park=0), _candidate(900, metres=1500))
+    short = (_corridor(100, canopy=70), _candidate(600, metres=500))
+    detour = (_corridor(200, canopy=45), _candidate(900, metres=1500))
     assert _best([short, detour]) is short
 
 
 def test_duration_breaks_a_tie():
-    """Two alternatives often pass the same trees — return the shorter walk."""
-    longer = (Corridor(trees=40, park=0), _candidate(900))
-    shorter = (Corridor(trees=40, park=0), _candidate(660))
+    """Two alternatives often cross the same zones — return the shorter walk."""
+    longer = (_corridor(40, canopy=60), _candidate(900))
+    shorter = (_corridor(40, canopy=60), _candidate(660))
     assert _best([longer, shorter]) is shorter
 
 
 def test_a_single_candidate_is_returned_unchanged():
     """AC6: Google sometimes finds only one route. It is still the chosen one."""
-    only = (Corridor(trees=7, park=0), _candidate(540))
+    only = (_corridor(7, canopy=30), _candidate(540))
     assert _best([only]) is only
 
 
-# --- normalising the corridor counts ----------------------------------------
+# --- turning the corridor counts into scores --------------------------------
 
 
 def test_park_share_is_the_proportion_of_park_trees():
-    assert Corridor(trees=200, park=150).metrics(1.0).parkShare == 75
+    assert _corridor(200, park=150).metrics().parkShare == 75
+
+
+def test_low_allergy_share_is_everything_not_flagged():
+    """Two of these ten are high-pollen, so eight in ten are not."""
+    metrics = _corridor(10, high_pollen=2).metrics()
+    assert metrics.lowAllergyShare == 80
+    assert metrics.highPollenTrees == 2
 
 
 def test_an_empty_corridor_does_not_divide_by_zero():
-    empty = Corridor(trees=0, park=0).metrics(1.0)
+    empty = _corridor(0).metrics()
     assert empty.parkShare == 0
+    assert empty.lowAllergyShare == 0
     assert empty.canopy == 0
-
-
-def test_canopy_is_capped_at_one_hundred():
-    """A corridor far denser than the full mark is 100, not 240."""
-    assert Corridor(trees=2000, park=0).metrics(1.0).canopy == 100
 
 
 # --- matching against what the user asked for -------------------------------
 
 
-def _metrics(canopy: int, park: int) -> AreaMetrics:
-    return AreaMetrics(canopy=canopy, parkShare=park)
+def _metrics(canopy: int, park: int, low_allergy: int | None = None) -> AreaMetrics:
+    return AreaMetrics(canopy=canopy, parkShare=park, lowAllergyShare=low_allergy)
 
 
 def test_only_selected_preferences_are_scored():
@@ -132,11 +140,19 @@ def test_time_is_a_constraint_and_stays_out_of_the_score():
     assert summary.score == 60
 
 
-def test_allergy_is_never_scored_until_the_taxonomy_is_agreed():
-    """Absent reads as unknown. A zero would render as "does not match", which
-    is a claim about pollen that nothing in the data supports."""
-    summary = _match(Preferences(allergy="lower"), _metrics(70, 40), minutes=12)
-    assert summary is None
+def test_allergy_is_scored_from_the_low_allergy_share():
+    summary = _match(Preferences(allergy="lower"), _metrics(70, 40, low_allergy=85), minutes=12)
+    assert summary.matches[0].key == "allergy"
+    assert summary.matches[0].matched is True
+
+
+def test_allergy_is_skipped_when_the_share_is_unknown():
+    """A transit leg has no corridor metrics, so there is nothing to score.
+
+    Absent reads as unknown; a zero would render as "does not match", which is
+    a claim about pollen that nothing in the data supports.
+    """
+    assert _match(Preferences(allergy="lower"), _metrics(70, 40), minutes=12) is None
 
 
 def test_the_sentence_names_what_was_met_and_what_was_not():
@@ -154,7 +170,7 @@ def test_the_sentence_says_closest_available_when_nothing_matched():
 
 def test_the_candidate_count_is_reported():
     """The panel reads "best match among the N routes Google found"."""
-    scored = (Corridor(trees=40, park=0), _candidate(600))
+    scored = (_corridor(40, park=0), _candidate(600))
     assert _result("WALK", scored, 2).candidateCount == 2
     assert _result("WALK", scored, 1).candidateCount == 1
 
@@ -165,7 +181,7 @@ def test_transit_makes_no_environmental_claim():
     metrics and match carry that, not treeCount — trees near the path is a true
     count either way, it is simply not what chose this route.
     """
-    transit = _result("TRANSIT", (Corridor(trees=40, park=20), _candidate(600)), 3)
+    transit = _result("TRANSIT", (_corridor(40, park=20), _candidate(600)), 3)
     assert transit.metrics is None
     assert transit.match is None
     assert transit.label == "Personalised transit route"
