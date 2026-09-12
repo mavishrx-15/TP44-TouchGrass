@@ -40,14 +40,17 @@ ZONES = [
 ]
 
 
-def _tree(com_id, zone, precinct, genus, sci, located_in, year):
+def _tree(com_id, zone, precinct, genus, sci, located_in, year, family="Myrtaceae"):
     lat, lon = float(zone.split("_")[0]), float(zone.split("_")[1])
     return (
         com_id,
         "Yellow Box",
         sci,
-        "Myrtaceae",
-        "Myrtaceae",
+        family,
+        # family_display_category files anything outside the nine display
+        # genera under "Other" — including the two families the high-pollen
+        # proxy names, which is why that rule reads the raw family column.
+        "Other" if family != "Myrtaceae" else "Myrtaceae",
         lat,
         lon,
         genus,
@@ -73,6 +76,18 @@ TREES = [
     # A zone holding nothing but "Other" gets no dominantGenus.
     _tree(6, "-37.800_144.960", "Carlton", "Other", "Ficus macrophylla", "Park", "1998"),
     _tree(7, "-37.800_144.960", "Carlton", "Other", "Ficus obliqua", "Street", "2005"),
+    # High-pollen by family, not by genus: display_category is "Other", so only
+    # the raw family column can see this one.
+    _tree(
+        8,
+        "-37.800_144.960",
+        "Carlton",
+        "Other",
+        "Cupressus macrocarpa",
+        "Street",
+        "1990",
+        family="Cupressaceae",
+    ),
 ]
 
 

@@ -133,6 +133,27 @@ DENSITY_LOW = 10
 # US1.3: cluster_id is the rounded centre of a 0.001-degree cell.
 GRID_HALF = 0.0005
 
+OTHER = "Other"
+GENERA_SHOWN = 3  # the recommendation card has room for three
+
+# US4.2 high-pollen proxy, specified by the team: five wind-pollinated genera,
+# plus two families that display_category cannot express.
+#
+# The family test reads trees.family, not family_display_category, which files
+# both of these under "Other" — 872 Cupressaceae and 803 Oleaceae would be
+# invisible through the display column.
+#
+# Eucalyptus and Corymbia are deliberately absent: insect and bird pollinated,
+# so not a high airborne risk, and they are the main canopy genera — flagging
+# them would set the canopy score against the allergy score. Acacia is absent
+# too; the hay fever it gets blamed for is mostly grasses flowering at the same
+# time.
+#
+# It is a proxy from species names, not pollen measurement, and the card says
+# so.
+HIGH_POLLEN_GENERA = ("Platanus", "Casuarina", "Allocasuarina", "Quercus", "Ulmus")
+HIGH_POLLEN_FAMILIES = ("Cupressaceae", "Oleaceae")
+
 EARTH_RADIUS_KM = 6371.0
 
 Density = Literal["High", "Medium", "Low"]
@@ -207,12 +228,83 @@ class Genus(BaseModel):
     treeCount: int
 
 
+class ZoneGenus(BaseModel):
+    """One line of a card's tree breakdown. Named apart from Genus, which is
+    the filter-panel shape and uses the frontend's older field names."""
+
+    name: str
+    count: int
+
+
+class AreaMetrics(BaseModel):
+    """Scores out of 100, none of them a measurement.
+
+    canopy is a percentile within the precinct, not across the city: 85 means
+    this area holds more trees than 85% of the other zones in the same suburb.
+    It is the same tree_count behind the existing High/Medium/Low tiers, read
+    as a number rather than three buckets — so it says nothing about crown area,
+    which the dataset does not record.
+
+    Ranking per precinct rather than citywide is what makes it useful on a
+    card: the cards only ever compare areas inside one suburb, and a citywide
+    scale would leave every zone in a leafy precinct at the top and every zone
+    in a sparse one at the bottom.
+
+    parkShare is the share of trees standing in a park rather than on a street
+    — the only shade or noise signal the data carries.
+
+    lowAllergyShare and highPollenTrees come from a species-name proxy, not
+    pollen measurement, and the card labels them as such.
+    """
+
+    canopy: int
+    parkShare: int
+    lowAllergyShare: int | None = None
+    highPollenTrees: int | None = None
+
+
+class ZoneProfile:
+    """Per-zone tallies, assembled from the grouped rows.
+
+    "Other" is left out of the genus mix throughout. It covers 30,898 trees —
+    38% of the dataset — so it wins the count in most zones while telling the
+    reader nothing, and a card listing "Other, 58 trees" is worse than one
+    listing two real genera.
+    """
+
+    def __init__(self) -> None:
+        self.total = 0
+        self.park = 0
+        self.high_pollen = 0
+        self.genera: dict[str, int] = {}
+
+    def ranked(self) -> list[ZoneGenus]:
+        top = sorted(self.genera.items(), key=lambda item: (-item[1], item[0]))
+        return [ZoneGenus(name=name, count=count) for name, count in top[:GENERA_SHOWN]]
+
+    def dominant(self) -> str | None:
+        ranked = self.ranked()
+        return ranked[0].name if ranked else None
+
+    def metrics(self, canopy_percentile: int) -> AreaMetrics:
+        return AreaMetrics(
+            canopy=canopy_percentile,
+            parkShare=self._share(self.park),
+            lowAllergyShare=self._share(self.total - self.high_pollen),
+            highPollenTrees=self.high_pollen,
+        )
+
+    def _share(self, part: int) -> int:
+        return round(100 * part / self.total) if self.total else 0
+
+
 class Zone(BaseModel):
     """A tree-dense area. center and treeCount are also what Epic 2 reads when
     scoring candidate routes."""
 
     id: str
     precinctId: str
+    precinctName: str
     center: Coordinates
     bounds: Bounds
     treeCount: int
@@ -220,6 +312,9 @@ class Zone(BaseModel):
     dominantGenus: str | None  # null when the zone holds nothing but "Other"
     distanceKm: float
     nearestStreet: str | None  # null when reverse geocoding found no nearby road
+    metrics: AreaMetrics
+    genera: list[ZoneGenus]
+    dataNotes: list[str]  # gaps the card shows rather than hides
 
 
 class Tree(BaseModel):
@@ -361,13 +456,19 @@ def list_zones(
     elif density == "Low":
         clause = f"AND tree_count < {DENSITY_LOW}"
 
+    # The percentile is ranked over the whole precinct before any filtering, so
+    # a density filter or a small limit cannot change what a zone scores.
     rows = session.execute(
         text(
             f"""
-            SELECT cluster_id, center_lat, center_lon, tree_count, precinct,
-                   street_name
-            FROM zones
-            WHERE precinct = :p {clause}
+            SELECT * FROM (
+                SELECT cluster_id, center_lat, center_lon, tree_count, precinct,
+                       street_name,
+                       PERCENT_RANK() OVER (ORDER BY tree_count) AS canopy_rank
+                FROM zones
+                WHERE precinct = :p
+            ) ranked
+            WHERE 1 = 1 {clause}
             ORDER BY tree_count DESC
             LIMIT :limit
             """
@@ -378,46 +479,72 @@ def list_zones(
         return []
 
     origin = _reference_point(session, name)
-    top = _dominant_genus({r.cluster_id for r in rows}, session)
-    return [
-        Zone(
-            id=r.cluster_id,
-            precinctId=_slug(r.precinct),
-            center=Coordinates(lat=r.center_lat, lng=r.center_lon),
-            bounds=_bounds(r.cluster_id),
-            treeCount=r.tree_count,
-            density=_density(r.tree_count),
-            dominantGenus=top.get(r.cluster_id),
-            distanceKm=_distance_km(origin.lat, origin.lng, r.center_lat, r.center_lon),
-            nearestStreet=r.street_name,
-        )
-        for r in rows
-    ]
+    profiles = _profiles({r.cluster_id for r in rows}, session)
+    return [_zone(r, profiles.get(r.cluster_id, ZoneProfile()), origin) for r in rows]
 
 
-def _dominant_genus(zone_ids: set[str], session: SessionDep) -> dict[str, str]:
-    """Most common genus per zone, ignoring "Other".
+def _zone(row, profile: ZoneProfile, origin: Coordinates) -> Zone:
+    return Zone(
+        id=row.cluster_id,
+        precinctId=_slug(row.precinct),
+        precinctName=row.precinct,
+        center=Coordinates(lat=row.center_lat, lng=row.center_lon),
+        bounds=_bounds(row.cluster_id),
+        treeCount=row.tree_count,
+        density=_density(row.tree_count),
+        dominantGenus=profile.dominant(),
+        distanceKm=_distance_km(origin.lat, origin.lng, row.center_lat, row.center_lon),
+        nearestStreet=row.street_name,
+        metrics=profile.metrics(round(100 * row.canopy_rank)),
+        genera=profile.ranked(),
+        dataNotes=_data_notes(row.street_name),
+    )
 
-    "Other" covers 30,898 trees — 38% of the dataset — so it wins the count in
-    most zones while telling the reader nothing. A zone whose trees are all
-    "Other" gets no label rather than a useless one.
+
+def _data_notes(street_name: str | None) -> list[str]:
+    """What this area cannot tell you, said out loud.
+
+    The design decision is explicit: a gap is flagged on the card, not hidden
+    and not filled with something invented. Both of these are real gaps today.
+    """
+    notes = ["Allergy data is not available yet."]
+    if street_name is None:
+        notes.insert(0, "No nearby street resolved; named by precinct.")
+    return notes
+
+
+def _profiles(zone_ids: set[str], session: SessionDep) -> dict[str, ZoneProfile]:
+    """Genus mix and park share for every zone in one query.
+
+    Grouping by category and location together means the genus breakdown, the
+    dominant genus and the park share all fall out of the same rows, instead of
+    a query per card.
     """
     rows = session.execute(
         text(
             """
-            SELECT cluster_id, display_category, COUNT(*) AS n
+            SELECT cluster_id, display_category, family, located_in, COUNT(*) AS n
             FROM trees
-            WHERE cluster_id IN :ids AND display_category <> 'Other'
-            GROUP BY cluster_id, display_category
-            ORDER BY cluster_id, n DESC
+            WHERE cluster_id IN :ids
+            GROUP BY cluster_id, display_category, family, located_in
             """
         ).bindparams(bindparam("ids", expanding=True)),
         {"ids": list(zone_ids)},
     ).all()
-    best: dict[str, str] = {}
-    for r in rows:
-        best.setdefault(r.cluster_id, r.display_category)
-    return best
+
+    profiles: dict[str, ZoneProfile] = {}
+    for row in rows:
+        profile = profiles.setdefault(row.cluster_id, ZoneProfile())
+        profile.total += row.n
+        if row.located_in == "Park":
+            profile.park += row.n
+        if row.display_category in HIGH_POLLEN_GENERA or row.family in HIGH_POLLEN_FAMILIES:
+            profile.high_pollen += row.n
+        if row.display_category != OTHER:
+            profile.genera[row.display_category] = (
+                profile.genera.get(row.display_category, 0) + row.n
+            )
+    return profiles
 
 
 @router.get("/trees", response_model=list[Tree])
