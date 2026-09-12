@@ -10,21 +10,17 @@ from sqlalchemy import text
 
 from app.config import settings
 from app.db import SessionDep
+from app.routers.map_data import (
+    HIGH_POLLEN_FAMILIES,
+    HIGH_POLLEN_GENERA,
+    AreaMetrics,
+)
 
 router = APIRouter()
 EARTH_RADIUS_M = 6_371_000
 TREE_CORRIDOR_M = 100
 
 TravelMode = Literal["WALK", "TRANSIT"]
-
-# A corridor as dense as twice the median puts a typical walk near 50 and tops
-# out on the leafiest. Derived from the data: the median zone holds 20 trees in
-# a 0.001-degree cell, and a kilometre of 100m corridor covers about 20 such
-# cells, so roughly 400 trees per kilometre is ordinary.
-#
-# NEEDS TEAM SIGN-OFF, like the allergy taxonomy: it sets where "High canopy"
-# starts, and no acceptance criterion fixes it.
-CANOPY_FULL_MARK_PER_KM = 800
 
 # Iteration-2 handoff, "Prototype rules requiring team confirmation".
 WALKING_TIME_TOLERANCE_MINUTES = 2
@@ -60,39 +56,23 @@ class RouteRequest(BaseModel):
 
 
 class Corridor(BaseModel):
-    """Raw counts for the trees within 100m of a route."""
+    """What stands within 100m of a route: tree counts, and a canopy rank."""
 
     trees: int
     park: int
+    high_pollen: int
+    canopy: int  # mean percentile of the zones the route passes through
 
-    def metrics(self, distance_km: float) -> "AreaMetrics":
-        """Turn the counts into the normalised scores the frontend reads.
-
-        Density is per kilometre, not absolute: a long walk passes more trees
-        than a short one without being any leafier, and comparing candidates on
-        the raw total would just prefer the longer route.
-        """
-        per_km = self.trees / distance_km if distance_km else 0
+    def metrics(self) -> AreaMetrics:
         return AreaMetrics(
-            canopy=min(100, round(100 * per_km / CANOPY_FULL_MARK_PER_KM)),
-            parkShare=round(100 * self.park / self.trees) if self.trees else 0,
+            canopy=self.canopy,
+            parkShare=self._share(self.park),
+            lowAllergyShare=self._share(self.trees - self.high_pollen),
+            highPollenTrees=self.high_pollen,
         )
 
-
-class AreaMetrics(BaseModel):
-    """Normalised scores, not measurements.
-
-    canopy is a score, not canopy coverage or a percentile — the dataset counts
-    trees, it does not measure crown area. parkShare is the share of trees in
-    the corridor that stand in a park rather than on a street: the only shade
-    and noise signal the data actually carries. The allergy pair is null until
-    the taxonomy is agreed, and null must read as unknown, never as matched.
-    """
-
-    canopy: int
-    parkShare: int
-    lowAllergyShare: int | None = None
-    highPollenTrees: int | None = None
+    def _share(self, part: int) -> int:
+        return round(100 * part / self.trees) if self.trees else 0
 
 
 class PreferenceMatch(BaseModel):
@@ -192,9 +172,19 @@ def _match(
             )
         )
 
-    # Allergy stays out entirely until the taxonomy is agreed. Absent reads as
-    # unknown; a zero here would render as "does not match", which is a claim
-    # about pollen that nothing in the data supports.
+    if preferences.allergy is not None and metrics.lowAllergyShare is not None:
+        # Both settings read the same share. "avoid" and "lower" would need two
+        # different thresholds to behave differently, and nothing has fixed
+        # those — one rule is better than two invented ones.
+        found.append(
+            PreferenceMatch(
+                key="allergy",
+                label="Allergy preference",
+                detail=f"{metrics.highPollenTrees} high-pollen trees along the path",
+                matched=metrics.lowAllergyShare >= 50,
+                value=metrics.lowAllergyShare,
+            )
+        )
 
     if preferences.walkingTime is not None:
         budget = preferences.walkingTime + WALKING_TIME_TOLERANCE_MINUTES
@@ -377,7 +367,7 @@ def plan_route(request: RouteRequest, session: SessionDep) -> RouteResult:
 
     chosen = _best(within)
     corridor, route = chosen
-    metrics = corridor.metrics(_distance_km(route))
+    metrics = corridor.metrics()
     return _result(
         request.travelMode,
         chosen,
@@ -389,19 +379,19 @@ def plan_route(request: RouteRequest, session: SessionDep) -> RouteResult:
 
 
 def _best(scored: list[tuple[Corridor, dict]]) -> tuple[Corridor, dict]:
-    """The leafiest candidate per kilometre, shortest first among equals.
+    """The candidate through the leafiest areas, shortest first among equals.
 
-    Per kilometre rather than in total: a longer way round passes more trees
-    without being any leafier, and ranking on the raw count would reward the
-    detour for being long.
+    Ranking on the canopy percentile rather than a raw count keeps length out of
+    it — a longer way round passes more trees without going anywhere leafier,
+    and a total would reward the detour for being long.
 
-    Duration is the tie-break rather than a competing goal — two alternatives
-    often pass the same trees, and there is no reason to return the longer one.
+    Duration is the tie-break rather than a competing goal: two alternatives
+    often cross the same zones, and there is no reason to return the longer one.
     """
     return max(
         scored,
         key=lambda candidate: (
-            candidate[0].trees / max(_distance_km(candidate[1]), 0.01),
+            candidate[0].canopy,
             -_duration_seconds(candidate[1]["duration"]),
         ),
     )
@@ -476,46 +466,87 @@ def _duration_seconds(value: str) -> int:
 
 
 def _corridor(path: list[tuple[float, float]], session: SessionDep) -> Corridor:
-    """Every tree within 100m of the route, counted three ways.
+    """Everything within 100m of the route: the trees, and the zones.
 
-    One query feeds all three scorers. It reads trees rather than zone centres:
-    a zone contributes its whole count the moment its centre falls in range,
-    which is close enough for "is this walk leafy" but cannot answer park-vs-
-    street, because located_in lives on the tree.
+    The trees answer park-versus-street and high-pollen, which live on the tree
+    row. The zones answer canopy, because canopy is defined as a zone's rank
+    inside its own precinct and a route has no precinct of its own to be ranked
+    in — it is scored by the areas it passes through.
     """
     if not path:
-        return Corridor(trees=0, park=0)
+        return Corridor(trees=0, park=0, high_pollen=0, canopy=0)
 
+    box = _bounding_box(path)
+    trees = _near(
+        session.execute(
+            text(
+                """
+                SELECT latitude, longitude, located_in, display_category, family
+                FROM trees
+                WHERE latitude BETWEEN :south AND :north
+                  AND longitude BETWEEN :west AND :east
+                """
+            ),
+            box,
+        ).all(),
+        path,
+        lambda row: (row.latitude, row.longitude),
+    )
+
+    # Ranked across every zone before the bounding box narrows it down: a zone's
+    # percentile is a property of its precinct, not of this route's neighbours.
+    zones = _near(
+        session.execute(
+            text(
+                """
+                SELECT center_lat, center_lon, canopy_rank FROM (
+                    SELECT center_lat, center_lon,
+                           PERCENT_RANK() OVER (
+                               PARTITION BY precinct ORDER BY tree_count
+                           ) AS canopy_rank
+                    FROM zones
+                ) ranked
+                WHERE center_lat BETWEEN :south AND :north
+                  AND center_lon BETWEEN :west AND :east
+                """
+            ),
+            box,
+        ).all(),
+        path,
+        lambda row: (row.center_lat, row.center_lon),
+    )
+
+    return Corridor(
+        trees=len(trees),
+        park=sum(1 for row in trees if row.located_in == "Park"),
+        high_pollen=sum(
+            1
+            for row in trees
+            if row.display_category in HIGH_POLLEN_GENERA or row.family in HIGH_POLLEN_FAMILIES
+        ),
+        canopy=round(100 * sum(row.canopy_rank for row in zones) / len(zones)) if zones else 0,
+    )
+
+
+def _bounding_box(path: list[tuple[float, float]]) -> dict[str, float]:
     latitudes = [point[0] for point in path]
     longitudes = [point[1] for point in path]
-    padding = 0.002  # ~200m, so the bbox covers the corridor at either end
-    rows = session.execute(
-        text(
-            """
-            SELECT latitude, longitude, located_in
-            FROM trees
-            WHERE latitude BETWEEN :south AND :north
-              AND longitude BETWEEN :west AND :east
-            """
-        ),
-        {
-            "south": min(latitudes) - padding,
-            "north": max(latitudes) + padding,
-            "west": min(longitudes) - padding,
-            "east": max(longitudes) + padding,
-        },
-    ).all()
+    padding = 0.002  # ~200m, so the box covers the corridor at either end
+    return {
+        "south": min(latitudes) - padding,
+        "north": max(latitudes) + padding,
+        "west": min(longitudes) - padding,
+        "east": max(longitudes) + padding,
+    }
 
-    near = [
+
+def _near(rows: list, path: list[tuple[float, float]], point) -> list:
+    """Rows whose point falls within the corridor, not just the bounding box."""
+    return [
         row
         for row in rows
-        if min(_distance_m(row.latitude, row.longitude, lat, lng) for lat, lng in path)
-        <= TREE_CORRIDOR_M
+        if min(_distance_m(*point(row), lat, lng) for lat, lng in path) <= TREE_CORRIDOR_M
     ]
-    return Corridor(
-        trees=len(near),
-        park=sum(1 for row in near if row.located_in == "Park"),
-    )
 
 
 def _distance_m(lat_a: float, lng_a: float, lat_b: float, lng_b: float) -> float:
