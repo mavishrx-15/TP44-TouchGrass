@@ -2,6 +2,12 @@
 #
 # Loads touch_grass_map_data.json into the zones/trees/species tables.
 # Run schema.sql FIRST to create the tables before running this.
+#
+# Zones should already carry a "street_name" field before this runs - see
+# enrich_zones.py, which reverse-geocodes each zone's center point and
+# writes that field into the dataset. If a zone lacks it (e.g. enrichment
+# wasn't run, or the zone had no nearby road), street_name is loaded as
+# NULL.
 
 import json
 
@@ -21,12 +27,20 @@ with open("../dataset/touch_grass_map_data.json") as f:
     data = json.load(f)
 
 zone_rows = [
-    (z["cluster_id"], z["center_lat"], z["center_lon"], z["tree_count"], z["precinct"])
+    (
+        z["cluster_id"],
+        z["center_lat"],
+        z["center_lon"],
+        z["tree_count"],
+        z["precinct"],
+        z.get("street_name"),
+    )
     for z in data["zones"]
 ]
 execute_values(
     cur,
-    "INSERT INTO zones (cluster_id, center_lat, center_lon, tree_count, precinct) VALUES %s",
+    """INSERT INTO zones (cluster_id, center_lat, center_lon, tree_count,
+       precinct, street_name) VALUES %s""",
     zone_rows,
 )
 

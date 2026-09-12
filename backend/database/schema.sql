@@ -6,7 +6,8 @@ CREATE TABLE zones (
     center_lat DOUBLE PRECISION NOT NULL,
     center_lon DOUBLE PRECISION NOT NULL,
     tree_count INTEGER NOT NULL,
-    precinct TEXT NOT NULL
+    precinct TEXT NOT NULL,
+    street_name TEXT
 );
 
 CREATE TABLE trees (
