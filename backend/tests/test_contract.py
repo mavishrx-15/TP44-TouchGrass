@@ -153,6 +153,18 @@ def test_dominant_genus_is_null_when_a_zone_is_all_other(client):
     assert zone["dominantGenus"] is None
 
 
+def test_nearest_street_is_null_when_no_road_was_geocoded(client):
+    """US4.2: zones are named by their street instead of a "Zone 01" counter.
+
+    enrich_zones.py leaves street_name empty for a zone centred in a park, so
+    null is a real answer and not an error. The frontend falls back to the
+    precinct name — that substitution belongs there, not here, so this endpoint
+    reports the absence rather than inventing a label.
+    """
+    assert _zones(client, "kensington")[0]["nearestStreet"] == "Macaulay Road"
+    assert _zones(client, "carlton")[0]["nearestStreet"] is None
+
+
 # --- shapes and errors ------------------------------------------------------
 
 
@@ -179,6 +191,7 @@ def test_response_fields_are_camel_case(client):
         "density",
         "dominantGenus",
         "distanceKm",
+        "nearestStreet",
     }
     assert set(_trees(client, zoneId="-37.795_144.915")[0]) == {
         "id",

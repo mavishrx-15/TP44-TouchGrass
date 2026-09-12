@@ -76,6 +76,15 @@ this latitude. Verified: all 82,058 trees fall inside their own cell. The
 bounds are returned rather than left to the frontend, so both sides draw the
 same square.
 
+ZONE NAMES (US4.2)
+------------------
+nearestStreet is the road closest to the zone centre, reverse-geocoded offline
+by database/enrich_zones.py and stored on the row — this endpoint reads it, it
+never calls a geocoder per request. It is null for a zone centred in a park
+with no road near enough to resolve. The frontend falls back to the precinct
+name in that case; the substitution belongs there, so the absence is reported
+here rather than papered over with a placeholder.
+
 DISTANCE (US1.2)
 ----------------
 distanceKm is measured from the precinct's reference point — the mean
@@ -210,6 +219,7 @@ class Zone(BaseModel):
     density: Density
     dominantGenus: str | None  # null when the zone holds nothing but "Other"
     distanceKm: float
+    nearestStreet: str | None  # null when reverse geocoding found no nearby road
 
 
 class Tree(BaseModel):
@@ -354,7 +364,8 @@ def list_zones(
     rows = session.execute(
         text(
             f"""
-            SELECT cluster_id, center_lat, center_lon, tree_count, precinct
+            SELECT cluster_id, center_lat, center_lon, tree_count, precinct,
+                   street_name
             FROM zones
             WHERE precinct = :p {clause}
             ORDER BY tree_count DESC
@@ -378,6 +389,7 @@ def list_zones(
             density=_density(r.tree_count),
             dominantGenus=top.get(r.cluster_id),
             distanceKm=_distance_km(origin.lat, origin.lng, r.center_lat, r.center_lon),
+            nearestStreet=r.street_name,
         )
         for r in rows
     ]

@@ -27,13 +27,16 @@ SCHEMA = Path(__file__).resolve().parent.parent / "database" / "schema.sql"
 
 # cluster_id is the rounded centre of a 0.001-degree cell, so these ids also
 # fix where each zone's square lies.
+# street_name is nullable: enrich_zones.py leaves it empty for a zone centred
+# in a park or reserve, with no road near enough to reverse-geocode. The last
+# row is that case, so the API contract is exercised both ways.
 ZONES = [
-    # cluster_id,          lat,      lon,       tree_count, precinct
-    ("-37.795_144.915", -37.795, 144.915, 38, "Kensington"),  # High: boundary
-    ("-37.796_144.916", -37.796, 144.916, 37, "Kensington"),  # Medium: boundary
-    ("-37.797_144.917", -37.797, 144.917, 10, "Kensington"),  # Medium: boundary
-    ("-37.798_144.918", -37.798, 144.918, 9, "Kensington"),  # Low: boundary
-    ("-37.800_144.960", -37.800, 144.960, 50, "Carlton"),  # all trees "Other"
+    # cluster_id,          lat,      lon,       tree_count, precinct, street_name
+    ("-37.795_144.915", -37.795, 144.915, 38, "Kensington", "Macaulay Road"),  # High: boundary
+    ("-37.796_144.916", -37.796, 144.916, 37, "Kensington", "Bellair Street"),  # Medium: boundary
+    ("-37.797_144.917", -37.797, 144.917, 10, "Kensington", "Rankins Road"),  # Medium: boundary
+    ("-37.798_144.918", -37.798, 144.918, 9, "Kensington", "Altona Street"),  # Low: boundary
+    ("-37.800_144.960", -37.800, 144.960, 50, "Carlton", None),  # all trees "Other"
 ]
 
 
@@ -78,7 +81,7 @@ def client(tmp_path: Path) -> Iterator[TestClient]:
     db = tmp_path / "test.db"
     raw = sqlite3.connect(db)
     raw.executescript(SCHEMA.read_text())
-    raw.executemany("INSERT INTO zones VALUES (?, ?, ?, ?, ?)", ZONES)
+    raw.executemany("INSERT INTO zones VALUES (?, ?, ?, ?, ?, ?)", ZONES)
     raw.executemany("INSERT INTO trees VALUES (" + ", ".join(["?"] * 15) + ")", TREES)
     raw.commit()
     raw.close()
