@@ -1,6 +1,7 @@
 """Walking routes backed by Google Routes and scored against local tree zones."""
 
 from math import asin, cos, radians, sin, sqrt
+from typing import Literal
 
 import httpx
 from fastapi import APIRouter, HTTPException, Query
@@ -14,6 +15,8 @@ router = APIRouter()
 EARTH_RADIUS_M = 6_371_000
 TREE_CORRIDOR_M = 100
 
+TravelMode = Literal["WALK", "TRANSIT"]
+
 
 class Coordinates(BaseModel):
     lat: float
@@ -23,14 +26,22 @@ class Coordinates(BaseModel):
 class RouteRequest(BaseModel):
     origin: Coordinates
     destination: Coordinates
+    travelMode: TravelMode = "WALK"
 
 
 class RouteResult(BaseModel):
-    id: str
-    label: str
+    """One route. There is never a second one to compare it against (US3.2).
+
+    treeCount is null in TRANSIT mode: the corridor score describes what you
+    walk past, and it would be a false claim about a tram ride. AC forbids the
+    explanation making a tree, noise or allergy claim in that mode, so the
+    number it would be built from is absent rather than zero.
+    """
+
+    travelMode: TravelMode
     durationMinutes: int
     distanceKm: float
-    treeCount: int
+    treeCount: int | None
     encodedPolyline: str
 
 
@@ -90,16 +101,26 @@ def place_details(place_id: str) -> PlaceDetails:
     )
 
 
-@router.post("/routes", response_model=list[RouteResult])
-def walking_routes(request: RouteRequest, session: SessionDep) -> list[RouteResult]:
-    """Return Google's fastest walk and the alternative passing most zone trees."""
+@router.post("/routes", response_model=RouteResult)
+def plan_route(request: RouteRequest, session: SessionDep) -> RouteResult:
+    """Score Google's alternatives and return the single best one (US3.2).
+
+    This used to return two routes labelled "Fastest" and "Tree-Dense" and let
+    the user pick. The comparison was the feature, and it is the thing that got
+    cut: offering a greener option next to a faster one asks the user to do the
+    weighing the app exists to do for them. One route, already chosen.
+
+    Google still gets computeAlternativeRoutes: we need several candidates to
+    choose between. What changed is that the choosing happens here instead of
+    on screen.
+    """
     if not settings.google_maps_api_key:
         raise HTTPException(status_code=503, detail="Google Routes API key is not configured.")
 
     payload = {
         "origin": {"location": {"latLng": _lat_lng(request.origin)}},
         "destination": {"location": {"latLng": _lat_lng(request.destination)}},
-        "travelMode": "WALK",
+        "travelMode": request.travelMode,
         "computeAlternativeRoutes": True,
         "languageCode": "en-AU",
         "units": "METRIC",
@@ -130,22 +151,33 @@ def walking_routes(request: RouteRequest, session: SessionDep) -> list[RouteResu
 
     candidates = response.json().get("routes", [])
     if not candidates:
-        raise HTTPException(status_code=404, detail="No walking route was found.")
+        raise HTTPException(status_code=404, detail="No route was found.")
+
+    if request.travelMode == "TRANSIT":
+        # Nothing to score: the corridor count describes a walk. Shortest wins.
+        fastest = min(candidates, key=lambda item: _duration_seconds(item["duration"]))
+        return _result(request.travelMode, (None, fastest))
 
     scored = [
         (_tree_score(_decode_polyline(item["polyline"]["encodedPolyline"]), session), item)
         for item in candidates
     ]
-    fastest = min(scored, key=lambda candidate: _duration_seconds(candidate[1]["duration"]))
-    alternatives = [candidate for candidate in scored if candidate[1] is not fastest[1]]
-    green = max(
-        alternatives or [fastest],
+    return _result(request.travelMode, _best(scored))
+
+
+def _best(scored: list[tuple[int, dict]]) -> tuple[int, dict]:
+    """The highest-scoring candidate, shortest first among equals.
+
+    Duration is the tie-break rather than a competing goal: two alternatives
+    often pass the same trees, and there is no reason to hand back the longer
+    one. When Google returns a single alternative it wins by default — AC6
+    asks that this reads as a choice, not an implied comparison, which is why
+    nothing in the response says how many candidates there were.
+    """
+    return max(
+        scored,
         key=lambda candidate: (candidate[0], -_duration_seconds(candidate[1]["duration"])),
     )
-    results = [_result("fastest", "Fastest Route", fastest)]
-    if green[1] is not fastest[1]:
-        results.append(_result("green", "Tree-Dense Route", green))
-    return results
 
 
 def _google_request(method: str, url: str, field_mask: str, json: dict | None = None) -> dict:
@@ -179,11 +211,10 @@ def _lat_lng(value: Coordinates) -> dict[str, float]:
     return {"latitude": value.lat, "longitude": value.lng}
 
 
-def _result(route_id: str, label: str, scored: tuple[int, dict]) -> RouteResult:
+def _result(travel_mode: TravelMode, scored: tuple[int | None, dict]) -> RouteResult:
     tree_count, route = scored
     return RouteResult(
-        id=route_id,
-        label=label,
+        travelMode=travel_mode,
         durationMinutes=round(_duration_seconds(route["duration"]) / 60),
         distanceKm=round(route["distanceMeters"] / 1000, 1),
         treeCount=tree_count,
