@@ -5,7 +5,7 @@ that happens after the response comes back — the part US3.2 actually changed.
 Everything below is a pure function over candidates shaped like Google's.
 """
 
-from app.routers.routes import _best, _decode_polyline, _duration_seconds
+from app.routers.routes import _best, _decode_polyline, _duration_seconds, _result
 
 
 def _candidate(seconds: int) -> dict:
@@ -49,3 +49,25 @@ def test_duration_is_read_from_googles_seconds_string():
 def test_an_empty_polyline_decodes_to_no_points():
     """A route with no geometry scores zero rather than raising."""
     assert _decode_polyline("") == []
+
+
+def test_the_candidate_count_is_reported():
+    """The panel reads "best match among the N routes Google found".
+
+    N is the number of alternatives Google returned, not the number that were
+    scored or shown, so it comes straight from the response length.
+    """
+    assert _result("WALK", (40, _candidate(600)), 2).candidateCount == 2
+    assert _result("WALK", (40, _candidate(600)), 1).candidateCount == 1
+
+
+def test_transit_makes_no_environmental_claim():
+    """AC: no tree, noise or allergy claim about a transit leg.
+
+    metrics and match carry that, not treeCount — trees near the path is a true
+    count either way, it is simply not what chose this route.
+    """
+    transit = _result("TRANSIT", (40, _candidate(600)), 3)
+    assert transit.metrics is None
+    assert transit.match is None
+    assert transit.label == "Personalised transit route"

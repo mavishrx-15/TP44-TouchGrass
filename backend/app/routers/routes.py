@@ -23,26 +23,85 @@ class Coordinates(BaseModel):
     lng: float
 
 
+class Preferences(BaseModel):
+    """What the user asked for on the home page. Every field is optional.
+
+    Unset preferences contribute nothing to the score rather than counting as
+    zero — leaving canopy alone must not read as "wants no trees".
+    """
+
+    canopy: int | None = None  # 0-100 slider
+    shade: int | None = None  # 0-100 slider
+    noise: Literal["quiet", "lively"] | None = None
+    allergy: Literal["avoid", "lower"] | None = None
+    walkingTime: Literal[5, 10, 15, 20] | None = None
+
+
 class RouteRequest(BaseModel):
     origin: Coordinates
     destination: Coordinates
     travelMode: TravelMode = "WALK"
+    preferences: Preferences | None = None
+    # Optional so the Iteration 1 frontend keeps working while the new one
+    # lands; the personalised flow always sends it.
+    precinctId: str | None = None
+
+
+class AreaMetrics(BaseModel):
+    """Normalised scores, not measurements.
+
+    canopy is a score, not canopy coverage or a percentile — the dataset counts
+    trees, it does not measure crown area. parkShare is the share of trees in
+    the corridor that stand in a park rather than on a street: the only shade
+    and noise signal the data actually carries. The allergy pair is null until
+    the taxonomy is agreed, and null must read as unknown, never as matched.
+    """
+
+    canopy: int
+    parkShare: int
+    lowAllergyShare: int | None = None
+    highPollenTrees: int | None = None
+
+
+class PreferenceMatch(BaseModel):
+    key: Literal["canopy", "shade", "noise", "allergy", "time"]
+    label: str
+    detail: str
+    matched: bool
+    value: int
+
+
+class MatchSummary(BaseModel):
+    score: int
+    matches: list[PreferenceMatch]
+    sentence: str
 
 
 class RouteResult(BaseModel):
     """One route. There is never a second one to compare it against (US3.2).
 
-    treeCount is null in TRANSIT mode: the corridor score describes what you
-    walk past, and it would be a false claim about a tram ride. AC forbids the
-    explanation making a tree, noise or allergy claim in that mode, so the
-    number it would be built from is absent rather than zero.
+    metrics and match are null in TRANSIT mode: AC forbids a tree, noise or
+    allergy claim about a tram ride, and null is what carries that — treeCount
+    stays a plain count of trees near the path, which is true either way but is
+    not used to choose or explain a transit route.
+
+    candidateCount is how many alternatives Google returned. The panel says
+    "chosen as the best match among the N routes Google found", so the number
+    has to come from here; when it is 1 the frontend words it as a choice
+    rather than a comparison (AC6).
     """
 
+    id: Literal["personalised"] = "personalised"
+    label: str
     travelMode: TravelMode
     durationMinutes: int
     distanceKm: float
-    treeCount: int | None
+    treeCount: int
     encodedPolyline: str
+    candidateCount: int
+    metrics: AreaMetrics | None = None
+    match: MatchSummary | None = None
+    message: str | None = None
 
 
 class PlaceSuggestion(BaseModel):
@@ -153,16 +212,19 @@ def plan_route(request: RouteRequest, session: SessionDep) -> RouteResult:
     if not candidates:
         raise HTTPException(status_code=404, detail="No route was found.")
 
-    if request.travelMode == "TRANSIT":
-        # Nothing to score: the corridor count describes a walk. Shortest wins.
-        fastest = min(candidates, key=lambda item: _duration_seconds(item["duration"]))
-        return _result(request.travelMode, (None, fastest))
-
     scored = [
         (_tree_score(_decode_polyline(item["polyline"]["encodedPolyline"]), session), item)
         for item in candidates
     ]
-    return _result(request.travelMode, _best(scored))
+
+    if request.travelMode == "TRANSIT":
+        # Selection is by time alone. The tree count still comes back — it is a
+        # true count of trees near the path — but nothing is scored or claimed.
+        chosen = min(scored, key=lambda candidate: _duration_seconds(candidate[1]["duration"]))
+    else:
+        chosen = _best(scored)
+
+    return _result(request.travelMode, chosen, len(candidates))
 
 
 def _best(scored: list[tuple[int, dict]]) -> tuple[int, dict]:
@@ -211,14 +273,18 @@ def _lat_lng(value: Coordinates) -> dict[str, float]:
     return {"latitude": value.lat, "longitude": value.lng}
 
 
-def _result(travel_mode: TravelMode, scored: tuple[int | None, dict]) -> RouteResult:
+def _result(travel_mode: TravelMode, scored: tuple[int, dict], candidate_count: int) -> RouteResult:
     tree_count, route = scored
     return RouteResult(
+        label=(
+            "Personalised walking route" if travel_mode == "WALK" else "Personalised transit route"
+        ),
         travelMode=travel_mode,
         durationMinutes=round(_duration_seconds(route["duration"]) / 60),
         distanceKm=round(route["distanceMeters"] / 1000, 1),
         treeCount=tree_count,
         encodedPolyline=route["polyline"]["encodedPolyline"],
+        candidateCount=candidate_count,
     )
 
 
