@@ -10,10 +10,12 @@ import {
   loadPrecincts,
   rankAreas,
   requestPersonalisedRoute,
+  USE_MOCK_DATA,
 } from '@/services/personalisation.service'
 import { preferenceChips } from '@/services/preferences'
 
-const STORAGE_KEY = 'touchgrass.journey.v2'
+// Fixture destinations must not leak into a live-data session.
+const STORAGE_KEY = USE_MOCK_DATA ? 'touchgrass.journey.v2' : 'touchgrass.journey.live.v1'
 function restore(): JourneyContext {
   const fallback = { preferences: emptyPreferences(), startLocation: null, destination: null }
   try {

@@ -117,7 +117,7 @@ onMounted(async () => {
     <section class="journey-map" aria-label="Your route map">
       <GoogleMapCanvas
         :center="center"
-        :trees="[]"
+        :trees="journey.selectedArea?.trees ?? []"
         :zones="journey.selectedArea ? [journey.selectedArea] : []"
         :directions-open="!!journey.route"
         :route-options="journey.route ? [journey.route] : []"
@@ -166,8 +166,8 @@ onMounted(async () => {
         }}</span>
         <h1>{{ journey.destination?.label ?? 'A greener journey starts here.' }}</h1>
         <p class="route-subtitle" v-if="journey.selectedArea && journey.travelMode === 'WALK'">
-          {{ journey.selectedArea.treeCount }} trees ·
-          {{ canopyLabel(journey.selectedArea.metrics.canopy) }} canopy at your destination
+          {{ journey.selectedArea.treeCount }} trees · {{ journey.selectedArea.density }} tree
+          density at your destination
         </p>
         <p class="route-subtitle" v-else-if="!journey.destination">
           Choose your starting point and a destination, or set your preferences on Home.
@@ -259,6 +259,10 @@ onMounted(async () => {
                 This preview selects one of {{ journey.route.candidateCount }} sample routes. Live
                 walking alternatives will be provided by Google when connected.
               </p>
+              <p v-else-if="journey.route.scoringPending">
+                Showing one live walking route from the existing route service. Tree count is a
+                provisional canopy proxy; full preference scoring is still being connected.
+              </p>
               <p v-else-if="journey.route.candidateCount > 1">
                 Chosen as the best match among {{ journey.route.candidateCount }} walking routes
                 Google found between these points — not a custom path built around this area.
@@ -267,7 +271,14 @@ onMounted(async () => {
                 Google returned one walking route between these points. Its preference matches are
                 shown above.
               </p>
-              <p v-if="journey.preferences.allergy" class="allergy-explanation">
+              <p
+                v-if="journey.preferences.allergy && journey.route.scoringPending"
+                class="allergy-explanation"
+              >
+                Your allergy preference is saved, but allergy route scoring is not yet available.
+                This route has not been assessed for pollen exposure.
+              </p>
+              <p v-else-if="journey.preferences.allergy" class="allergy-explanation">
                 Your allergy preference favours the least-allergenic available alternative; it does
                 not create a custom detour. Allergy classifications are not yet confirmed.
               </p>
@@ -286,6 +297,19 @@ onMounted(async () => {
       </div>
 
       <div class="route-actions">
+        <a
+          v-if="
+            journey.travelMode === 'TRANSIT' &&
+            journey.error &&
+            journey.startLocation &&
+            journey.destination
+          "
+          class="primary-button"
+          :href="navigationUrl"
+          target="_blank"
+          rel="noopener noreferrer"
+          >Open transport directions in Google Maps ↗</a
+        >
         <a
           v-if="journey.route && !journey.loading"
           class="primary-button"

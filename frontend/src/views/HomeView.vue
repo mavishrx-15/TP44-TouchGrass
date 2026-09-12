@@ -19,6 +19,11 @@ const locationError = ref('')
 const initError = ref('')
 const locating = ref(false)
 const submitting = ref(false)
+const quickPrecincts = computed(() =>
+  ['melbourne', 'melbourne-cbd', 'kensington', 'parkville', 'north-melbourne', 'docklands'].flatMap(
+    (id) => journey.precincts.filter((precinct) => precinct.id === id),
+  ),
+)
 const times: { label: string; value: Preferences['walkingTime'] }[] = [
   { label: '5 min', value: 5 },
   { label: '10 min', value: 10 },
@@ -159,7 +164,7 @@ onMounted(initialize)
         <div class="field-caption">Or choose an area</div>
         <div class="pills area-pills" role="group" aria-label="Starting area">
           <button
-            v-for="precinct in journey.precincts"
+            v-for="precinct in quickPrecincts"
             :key="precinct.id"
             type="button"
             :class="{ selected: journey.startLocation?.id === precinct.id }"

@@ -8,14 +8,27 @@ import type {
 // Prototype rules pending backend agreement; used by mock areas AND mock routes.
 export const WALKING_TOLERANCE_MINUTES = 2
 export const COVERAGE_THRESHOLD_KM = 5
-export const canopyLabel = (score: number) =>
-  score >= 0.75 ? 'High' : score >= 0.4 ? 'Medium' : 'Low'
-export const shadeLabel = (share: number) =>
-  share >= 0.65 ? 'Cooler & shaded' : share >= 0.35 ? 'Partial shade' : 'Sunny & open'
-export const noiseLabel = (share: number) =>
-  share >= 0.65 ? 'Mostly park-side' : share >= 0.35 ? 'Mixed street/park' : 'Mostly street-side'
+export const canopyLabel = (score: number | null) =>
+  score === null ? 'Not available' : score >= 0.75 ? 'High' : score >= 0.4 ? 'Medium' : 'Low'
+export const shadeLabel = (share: number | null) =>
+  share === null
+    ? 'Not available'
+    : share >= 0.65
+      ? 'Cooler & shaded'
+      : share >= 0.35
+        ? 'Partial shade'
+        : 'Sunny & open'
+export const noiseLabel = (share: number | null) =>
+  share === null
+    ? 'Not available'
+    : share >= 0.65
+      ? 'Mostly park-side'
+      : share >= 0.35
+        ? 'Mixed street/park'
+        : 'Mostly street-side'
 
-function levelMatches(value: number, preference: number, low: number, high: number) {
+function levelMatches(value: number | null, preference: number, low: number, high: number) {
+  if (value === null) return false
   if (preference >= 60) return value >= high
   if (preference <= 35) return value < low
   return value >= low && value < high
@@ -76,7 +89,8 @@ export function scorePreferences(
     matches.push({ key, label, detail, value, matched })
   }
   if (preferences.canopy !== null) {
-    const value = 1 - Math.abs(metrics.canopy - preferences.canopy / 100)
+    const value =
+      metrics.canopy === null ? 0 : 1 - Math.abs(metrics.canopy - preferences.canopy / 100)
     add(
       'canopy',
       preferenceChips({
@@ -86,7 +100,9 @@ export function scorePreferences(
         allergy: null,
         walkingTime: null,
       })[0]!,
-      `${canopyLabel(metrics.canopy)} tree canopy`,
+      metrics.canopy === null
+        ? 'Canopy scoring is not available yet'
+        : `${canopyLabel(metrics.canopy)} tree canopy`,
       value,
       levelMatches(metrics.canopy, preferences.canopy, 0.4, 0.75),
     )
@@ -100,7 +116,7 @@ export function scorePreferences(
           ? 'Sunny & open'
           : 'Balanced shade',
       shadeLabel(metrics.parkShare),
-      1 - Math.abs(metrics.parkShare - preferences.shade / 100),
+      metrics.parkShare === null ? 0 : 1 - Math.abs(metrics.parkShare - preferences.shade / 100),
       levelMatches(metrics.parkShare, preferences.shade, 0.35, 0.65),
     )
   }
@@ -109,8 +125,13 @@ export function scorePreferences(
       'noise',
       preferences.noise === 'quiet' ? 'Quieter surroundings' : 'Lively atmosphere',
       noiseLabel(metrics.parkShare),
-      preferences.noise === 'quiet' ? metrics.parkShare : 1 - metrics.parkShare,
-      preferences.noise === 'quiet' ? metrics.parkShare >= 0.65 : metrics.parkShare < 0.35,
+      metrics.parkShare === null
+        ? 0
+        : preferences.noise === 'quiet'
+          ? metrics.parkShare
+          : 1 - metrics.parkShare,
+      metrics.parkShare !== null &&
+        (preferences.noise === 'quiet' ? metrics.parkShare >= 0.65 : metrics.parkShare < 0.35),
     )
   }
   if (preferences.allergy !== null) {

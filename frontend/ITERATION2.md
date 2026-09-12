@@ -5,8 +5,12 @@ The existing Iteration 1 deployment and Cloud Run backend are unchanged.
 
 ## Preview
 
-Run `npm ci` then `npm run dev` in `frontend`. The default is mock mode;
-`VITE_USE_MOCK_DATA=true` makes that choice explicit in Vercel.
+Run `npm ci` then `npm run dev` in `frontend`. Existing maps, Places search,
+precincts, zones, trees and walking routes use the real backend by default.
+Set `VITE_API_BASE_URL` to the existing Cloud Run URL (or your running local API).
+Use `http://localhost:5173` locally; that origin is allowed by the deployed API.
+`VITE_USE_MOCK_DATA=true` is an explicit, isolated fixture mode for tests only.
+The new access endpoint is independently mocked with `VITE_MOCK_ACCESS=true`.
 Use the public demo password `touchgrass-demo`. This password exercises the UI
 only; it is **not** deployment protection. Never put a real access password into
 a `VITE_` variable. No username, registration, user database, or localStorage is used.
@@ -19,7 +23,7 @@ Routes:
 - `/explore/recommendations`: up to three always-expanded cards.
 - `/map`: retained legacy tree browser with a single-route compatibility adapter.
 
-Mock areas are geographically relative to the selected/nearest covered precinct;
+In fixture mode only, mock areas are geographically relative to the selected/nearest covered precinct;
 straight-line distances use the actual resolved origin. Sample route geometry,
 tree counts, genus mix, and environmental metrics are illustrative, not Google
 directions. All mock screens disclose this. The sample search recognises the
@@ -32,8 +36,25 @@ on mobile; controls remain touch-sized. No separate Area Details page exists.
 
 ## Proposed backend handoff (not yet implemented)
 
-Set `VITE_USE_MOCK_DATA=false` only when the backend supports these contracts.
-There is no silent mock fallback if a real request fails.
+Keep `VITE_USE_MOCK_DATA=false` for normal development. The live adapter supports
+the CURRENT backend as well as the proposed enriched responses below; missing new
+fields do not prevent real maps/routes from working. There is no silent fixture
+fallback if a real request fails. Set `VITE_MOCK_ACCESS=false` once the real access
+verification endpoint is deployed.
+
+Current-backend compatibility:
+
+- Real zones retain their IDs, bounds, centres and counts. Missing street names
+  fall back to the precinct. Real trees provide the genus breakdown and markers.
+- Tree density provides a provisional canopy proxy. Shade/noise use park-side
+  share only when all trees for a zone are present in the bounded response;
+  incomplete zone samples and unimplemented allergy scores remain unknown.
+- Existing walking alternatives retain their exact Google polylines, distance
+  and time. The adapter selects ONE using available tree counts/time and labels
+  full preference scoring as pending. It never substitutes a schematic path.
+- The old backend ignores `travelMode`. A WALK response is never shown as TRANSIT;
+  until real transit is supported, the UI offers an external Google Maps link.
+- Fixture session locations use a separate storage key from live locations.
 
 1. `POST /api/access/verify`, request `{ "password": "..." }`, response
    `{ "token": "<signed token>", "expiresIn": 3600 }`. Wrong password: 401/403.
@@ -71,8 +92,8 @@ There is no silent mock fallback if a real request fails.
    distance, encodedPolyline, metrics, match, candidateCount, and optional message.
    Match/explanation data must come from the same scoring as selection. TRANSIT
    must replace the entire WALK result and have no environmental scoring claims.
-   The adapter rejects the current two-route response; it does not pretend that
-   the current Cloud Run implementation performs personalised scoring.
+   The adapter accepts the current two-route response and selects one, while
+   explicitly stating that full personalised scoring is pending.
 
 ## Prototype rules requiring team confirmation
 
@@ -107,7 +128,7 @@ There is no silent mock fallback if a real request fails.
 
 ## Verification
 
-`npm test` checks matching, budget tolerance, real-origin ranking, session access,
+`npm test` checks legacy live API compatibility, matching, budget tolerance, real-origin ranking, session access,
 state restoration, stale-response rejection, and WALK/TRANSIT cache behaviour.
 `npm run test:e2e` runs Chrome on desktop and a 390px mobile viewport, covering
 the access gate, input validation, full journey, refresh, and coverage notices.

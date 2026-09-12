@@ -1,4 +1,11 @@
-import type { Coordinates, Precinct, RouteOption, RoutePlace, TreeZone } from './discovery'
+import type {
+  Coordinates,
+  Precinct,
+  RouteOption,
+  RoutePlace,
+  TreeZone,
+  TreeRecord,
+} from './discovery'
 
 export interface Preferences {
   canopy: number | null
@@ -18,8 +25,8 @@ export const emptyPreferences = (): Preferences => ({
 
 export type TravelMode = 'WALK' | 'TRANSIT'
 export interface AreaMetrics {
-  canopy: number
-  parkShare: number
+  canopy: number | null
+  parkShare: number | null
   lowAllergyShare: number | null
   highPollenTrees: number | null
 }
@@ -28,6 +35,7 @@ export interface Area extends TreeZone {
   metrics: AreaMetrics
   genera: { name: string; count: number }[]
   dataNotes: string[]
+  trees?: TreeRecord[]
 }
 export interface PreferenceMatch {
   key: 'canopy' | 'shade' | 'noise' | 'allergy' | 'time'
@@ -52,6 +60,7 @@ export interface PersonalisedRoute extends RouteOption {
   candidateCount: number
   message: string | null
   isMock: boolean
+  scoringPending?: boolean
   path?: Coordinates[]
 }
 export interface PersonalisedRequest {

@@ -2,7 +2,15 @@ import { apiGet, apiPost } from '@/api/client'
 import { distanceKm, getPlaceDetails, getPlaceSuggestions, getPrecincts } from './discovery.service'
 import { mockAreas, mockPlaces, mockPrecincts } from './personalisation.mock'
 import { COVERAGE_THRESHOLD_KM, scorePreferences, withinBudget } from './preferences'
-import type { Coordinates, PlaceSuggestion, Precinct, RoutePlace } from '@/types/discovery'
+import type {
+  Coordinates,
+  PlaceSuggestion,
+  Precinct,
+  RoutePlace,
+  TreeRecord,
+  TreeZone,
+  RouteOption,
+} from '@/types/discovery'
 import type {
   Area,
   Coverage,
@@ -12,7 +20,10 @@ import type {
   Recommendation,
 } from '@/types/personalisation'
 
-export const USE_MOCK_DATA = import.meta.env.VITE_USE_MOCK_DATA !== 'false'
+// Existing maps, Places, zones and walking routes are LIVE by default.
+// Fully mocked data is an explicit fixture mode for isolated UI tests only.
+export const USE_MOCK_DATA = import.meta.env.VITE_USE_MOCK_DATA === 'true'
+export const MOCK_ACCESS = USE_MOCK_DATA || import.meta.env.VITE_MOCK_ACCESS !== 'false'
 export const pause = (ms = 450) => new Promise<void>((resolve) => setTimeout(resolve, ms))
 
 export async function loadPrecincts(): Promise<Precinct[]> {
@@ -81,20 +92,60 @@ export async function loadAreas(precinct: Precinct): Promise<Area[]> {
     await pause()
     return mockAreas(precinct)
   }
-  // Proposed enrichment contract; never fabricate real allergy/canopy data.
-  const result = await apiGet<Area[]>(
-    `/api/zones?precinct=${encodeURIComponent(precinct.id)}&limit=500`,
-  )
-  if (result.some((area) => !area.metrics || !area.genera)) {
-    throw new Error('Personalised area data is not available yet. Please try again later.')
+  const slug = encodeURIComponent(precinct.id)
+  const [zones, treeResponse] = await Promise.allSettled([
+    apiGet<(TreeZone & Partial<Area>)[]>(`/api/zones?precinct=${slug}&limit=500`),
+    apiGet<Omit<TreeRecord, 'distanceKm' | 'mapPosition'>[]>(
+      `/api/trees?precinct=${slug}&limit=5000`,
+    ),
+  ])
+  if (zones.status === 'rejected') throw zones.reason
+  const trees = treeResponse.status === 'fulfilled' ? treeResponse.value : []
+  const grouped = new Map<string, TreeRecord[]>()
+  for (const tree of trees) {
+    const group = grouped.get(tree.zoneId) ?? []
+    group.push({
+      ...tree,
+      distanceKm: distanceKm(precinct.referencePoint, tree.coordinates),
+      mapPosition: { x: 0, y: 0 },
+    })
+    grouped.set(tree.zoneId, group)
   }
-  return result.map((area) => ({
-    ...area,
-    nearestStreet: area.nearestStreet ?? null,
-    precinctName: precinct.name,
-    label: area.nearestStreet ? `${precinct.name} · ${area.nearestStreet}` : precinct.name,
-    dataNotes: area.dataNotes ?? [],
-  }))
+  return zones.value.map((area) => {
+    const records = grouped.get(area.id) ?? []
+    const complete = records.length === area.treeCount && records.length > 0
+    const counts = new Map<string, number>()
+    records.forEach((tree) => counts.set(tree.genus, (counts.get(tree.genus) ?? 0) + 1))
+    return {
+      ...area,
+      nearestStreet: area.nearestStreet ?? null,
+      precinctName: precinct.name,
+      label: area.nearestStreet ? `${precinct.name} · ${area.nearestStreet}` : precinct.name,
+      description: area.description ?? `${area.density}-density tree area.`,
+      mapPosition: { x: 0, y: 0, width: 0, height: 0 },
+      metrics: area.metrics ?? {
+        canopy: { High: 0.9, Medium: 0.55, Low: 0.2 }[area.density],
+        parkShare: complete
+          ? records.filter((tree) => tree.locatedIn === 'Park').length / records.length
+          : null,
+        lowAllergyShare: null,
+        highPollenTrees: null,
+      },
+      genera:
+        area.genera ??
+        Array.from(counts, ([name, count]) => ({ name, count }))
+          .sort((a, b) => b.count - a.count)
+          .slice(0, 3),
+      trees: records,
+      dataNotes: area.dataNotes ?? [
+        'Tree density is used as a canopy proxy; allergy scoring is not yet available.',
+        ...(!complete
+          ? ['Tree breakdown is incomplete; shade and noise information is unavailable.']
+          : ['Shade and noise use park-side tree share, not measured temperature or sound.']),
+        ...(!area.nearestStreet ? ['Nearby street has not been supplied yet.'] : []),
+      ],
+    }
+  })
 }
 
 export function rankAreas(
@@ -152,19 +203,74 @@ export async function requestPersonalisedRoute(
   area?: Area,
 ): Promise<PersonalisedRoute> {
   if (!USE_MOCK_DATA) {
-    const result = await apiPost<PersonalisedRoute | PersonalisedRoute[]>('/api/routes', input)
-    const route = Array.isArray(result) && result.length === 1 ? result[0] : result
-    if (
-      !route ||
-      Array.isArray(route) ||
-      route.travelMode !== input.travelMode ||
-      (input.travelMode === 'WALK' && (!route.match || !route.metrics))
-    ) {
-      throw new Error('Personalised routing is not available yet. Please try again later.')
+    type ApiRoute = Omit<RouteOption, 'id'> &
+      Partial<Omit<PersonalisedRoute, 'id'>> & { id: string }
+    const result = await apiPost<ApiRoute | ApiRoute[]>('/api/routes', input)
+    const routes = Array.isArray(result) ? result : [result]
+    if (!routes.length) throw new Error('No route was found. Try another destination.')
+    if (input.travelMode === 'TRANSIT') {
+      const transit = routes.find((route) => route.travelMode === 'TRANSIT')
+      // The old backend silently ignores travelMode. Never show its WALK result as TRANSIT.
+      if (!transit)
+        throw new Error(
+          'Transport is not supported by the current route service yet. Switch back to Walking, or open transport directions in Google Maps.',
+        )
+      return {
+        ...transit,
+        id: 'personalised',
+        travelMode: 'TRANSIT',
+        match: null,
+        metrics: null,
+        candidateCount: transit.candidateCount ?? 1,
+        message: transit.message ?? null,
+        isMock: false,
+      }
     }
-    if (input.travelMode === 'TRANSIT')
-      return { ...route, id: 'personalised', match: null, metrics: null, isMock: false }
-    return { ...route, id: 'personalised', isMock: false }
+    const ready = routes.find(
+      (route) => route.travelMode === 'WALK' && route.match && route.metrics,
+    )
+    if (ready && routes.length === 1)
+      return {
+        ...ready,
+        id: 'personalised',
+        travelMode: 'WALK',
+        match: ready.match!,
+        metrics: ready.metrics!,
+        candidateCount: ready.candidateCount ?? 1,
+        message: ready.message ?? null,
+        isMock: false,
+      }
+    const maxTrees = Math.max(1, ...routes.map((route) => route.treeCount))
+    const candidates: PersonalisedRoute[] = routes.map((route) => {
+      const metrics = {
+        canopy: route.treeCount / maxTrees,
+        parkShare: null,
+        lowAllergyShare: null,
+        highPollenTrees: null,
+      }
+      return {
+        ...route,
+        id: 'personalised',
+        label: 'Walking route',
+        travelMode: 'WALK',
+        match: scorePreferences(metrics, input.preferences, route.durationMinutes),
+        metrics,
+        candidateCount: routes.length,
+        message: null,
+        isMock: false,
+        scoringPending: true,
+      }
+    })
+    const chosen = chooseRoute(candidates, input.preferences)
+    return {
+      ...chosen,
+      message: [
+        chosen.message,
+        'Live Google walking route. Selection currently uses tree counts and walking time; shade, noise and allergy route scoring are not connected yet.',
+      ]
+        .filter(Boolean)
+        .join(' '),
+    }
   }
   await pause(650)
   const km = distanceKm(input.origin, input.destination)
@@ -184,8 +290,9 @@ export async function requestPersonalisedRoute(
     )
     const scored = {
       ...metrics,
-      canopy: Math.max(0, metrics.canopy - alternative * 0.23),
-      parkShare: Math.min(1, metrics.parkShare + alternative * 0.13),
+      canopy: metrics.canopy === null ? null : Math.max(0, metrics.canopy - alternative * 0.23),
+      parkShare:
+        metrics.parkShare === null ? null : Math.min(1, metrics.parkShare + alternative * 0.13),
     }
     return {
       id: 'personalised',

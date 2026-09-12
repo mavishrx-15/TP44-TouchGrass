@@ -1,5 +1,5 @@
 import { apiPost, ApiError } from '@/api/client'
-import { pause, USE_MOCK_DATA } from './personalisation.service'
+import { pause, MOCK_ACCESS } from './personalisation.service'
 
 const SESSION_KEY = 'touchgrass.access.v1'
 export const DEMO_PASSWORD = 'touchgrass-demo'
@@ -16,7 +16,7 @@ export function getAccessToken(): string | null {
       session &&
       typeof session.token === 'string' &&
       session.expiresAt > Date.now() &&
-      session.mock === USE_MOCK_DATA
+      session.mock === MOCK_ACCESS
     )
       return session.token
     sessionStorage.removeItem(SESSION_KEY)
@@ -29,7 +29,7 @@ export function getAccessToken(): string | null {
 export async function verifyAccess(password: string): Promise<void> {
   let token: string
   let expiresIn: number
-  if (USE_MOCK_DATA) {
+  if (MOCK_ACCESS) {
     await pause(350)
     if (password !== DEMO_PASSWORD) throw new Error('That password isn’t right. Please try again.')
     // This is a UI demo session, NOT a signed token or a security boundary.
@@ -53,7 +53,7 @@ export async function verifyAccess(password: string): Promise<void> {
   try {
     sessionStorage.setItem(
       SESSION_KEY,
-      JSON.stringify({ token, expiresAt: Date.now() + expiresIn * 1000, mock: USE_MOCK_DATA }),
+      JSON.stringify({ token, expiresAt: Date.now() + expiresIn * 1000, mock: MOCK_ACCESS }),
     )
   } catch {
     throw new Error('Allow session storage in your browser to continue.')

@@ -3,7 +3,7 @@ import { onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import LeafIcon from '@/components/LeafIcon.vue'
 import { DEMO_PASSWORD, verifyAccess } from '@/services/access.service'
-import { USE_MOCK_DATA } from '@/services/personalisation.service'
+import { MOCK_ACCESS } from '@/services/personalisation.service'
 const password = ref('')
 const error = ref('')
 const busy = ref(false)
@@ -66,7 +66,7 @@ onMounted(() => input.value?.focus())
           {{ busy ? 'Checking…' : 'Enter TouchGrass →' }}
         </button>
       </form>
-      <p v-if="USE_MOCK_DATA" class="access-demo">
+      <p v-if="MOCK_ACCESS" class="access-demo">
         Prototype access · Use <code>{{ DEMO_PASSWORD }}</code
         ><br />This demo gate does not secure live data.
       </p>

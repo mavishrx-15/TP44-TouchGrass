@@ -28,7 +28,7 @@ const partial = computed(() => props.area.match.matches.filter((item) => !item.m
       <GoogleMapCanvas
         :center="area.center"
         :destination="area.center"
-        :trees="[]"
+        :trees="area.trees ?? []"
         :zones="[area]"
         :directions-open="false"
         :route-options="[]"
