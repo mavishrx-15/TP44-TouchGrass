@@ -9,7 +9,13 @@ from fastapi import Header, HTTPException
 from app.config import settings
 
 
+def ensure_access_configured() -> None:
+    if not settings.access_password or len(settings.access_token_secret.encode()) < 32:
+        raise HTTPException(status_code=503, detail="Access gate is not configured")
+
+
 def _encode_token(payload: dict[str, int]) -> str:
+    ensure_access_configured()
     payload_bytes = json.dumps(payload, separators=(",", ":")).encode()
     encoded_payload = base64.urlsafe_b64encode(payload_bytes).rstrip(b"=")
     signature = hmac.new(
@@ -23,6 +29,7 @@ def _encode_token(payload: dict[str, int]) -> str:
 
 def _decode_token(token: str) -> dict[str, int] | None:
     try:
+        ensure_access_configured()
         encoded_payload, encoded_signature = token.split(".", 1)
         expected_signature = hmac.new(
             settings.access_token_secret.encode(),

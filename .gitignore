@@ -26,7 +26,7 @@ frontend/dist/
 Thumbs.db
 
 # local data & models
-data/
+/data/
 *.sqlite
 *.db
 weights/
@@ -36,3 +36,8 @@ weights/
 # tool caches
 .ruff_cache/
 .pytest_cache/
+
+# course governance documents — submitted via Moodle/Drive, not the repo
+(TouchGrass) Project Governance Portfolio*
+figma/
+.firebase/

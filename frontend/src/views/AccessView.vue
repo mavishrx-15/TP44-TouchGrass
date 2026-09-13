@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import { useRouter } from 'vue-router'
-import { setAccessToken } from '@/api/client'
+import { useRoute, useRouter } from 'vue-router'
+import { apiPost, ApiError, setAccessToken } from '@/api/client'
 
 const router = useRouter()
+const route = useRoute()
 const password = ref('')
 const error = ref('')
 const submitting = ref(false)
@@ -12,20 +13,22 @@ async function verifyPassword() {
   submitting.value = true
   error.value = ''
   try {
-    const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/access/verify`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password: password.value }),
+    const result = await apiPost<{ token: string }>('/api/access/verify', {
+      password: password.value,
     })
-    if (!response.ok) {
-      error.value = response.status === 401 ? 'Incorrect password.' : 'Unable to verify access.'
-      return
-    }
-    const result: { token: string } = await response.json()
     setAccessToken(result.token)
-    await router.push({ name: 'home' })
-  } catch {
-    error.value = 'Backend not reachable.'
+    password.value = ''
+    const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : '/'
+    await router.replace(
+      redirect.startsWith('/') && !redirect.startsWith('//') && !redirect.startsWith('/access')
+        ? redirect
+        : '/',
+    )
+  } catch (cause) {
+    error.value =
+      cause instanceof ApiError && cause.status === 401
+        ? 'Incorrect password.'
+        : 'Unable to verify access. Please try again.'
   } finally {
     submitting.value = false
   }

@@ -1,9 +1,10 @@
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
 import os
+
 import psycopg2
-from psycopg2.extras import RealDictCursor
 import requests
+from fastapi import APIRouter, HTTPException
+from psycopg2.extras import RealDictCursor
+from pydantic import BaseModel
 
 from app.config import settings
 
@@ -38,18 +39,22 @@ def _fetch_relevant_rows(db_url: str, question: str) -> list[dict]:
         kw = f"%{question}%"
         # Search trees by common_name or scientific_name
         cur.execute(
-            "SELECT 'trees' as table_name, com_id, common_name, scientific_name, family, display_category, latitude, longitude FROM trees WHERE common_name ILIKE %s OR scientific_name ILIKE %s LIMIT 10",
+            "SELECT 'trees' as table_name, com_id, common_name, scientific_name, "
+            "family, display_category, latitude, longitude FROM trees "
+            "WHERE common_name ILIKE %s OR scientific_name ILIKE %s LIMIT 10",
             (kw, kw),
         )
         rows.extend(cur.fetchall())
         # Search species by scientific_name or common_name
         cur.execute(
-            "SELECT 'species' as table_name, scientific_name, common_name, family, display_category, total_count FROM species WHERE scientific_name ILIKE %s OR common_name ILIKE %s LIMIT 10",
+            "SELECT 'species' as table_name, scientific_name, common_name, family, "
+            "display_category, total_count FROM species "
+            "WHERE scientific_name ILIKE %s OR common_name ILIKE %s LIMIT 10",
             (kw, kw),
         )
         rows.extend(cur.fetchall())
     except Exception:
-        # swallow DB errors here and return empty list; endpoint will still work but without grounding
+        # Return no grounding when the database is unavailable.
         return []
     finally:
         if conn:
@@ -80,7 +85,7 @@ def _call_gemini(prompt: str) -> str:
             body = resp.json()
         except Exception:
             body = resp.text if resp is not None else None
-        raise RuntimeError(f"Gemini API request failed: {e}; body={body}")
+        raise RuntimeError(f"Gemini API request failed: {e}; body={body}") from e
 
     data = resp.json()
     # Response shape may vary by API version; try to extract text in common places.
@@ -111,19 +116,29 @@ def chat(req: ChatRequest):
     grounding_lines = []
     for r in rows:
         if r.get("table_name") == "trees":
-            grounding_lines.append(f"Tree: {r.get('common_name')} ({r.get('scientific_name')}) at {r.get('latitude')},{r.get('longitude')} in category {r.get('display_category')}")
+            grounding_lines.append(
+                f"Tree: {r.get('common_name')} ({r.get('scientific_name')}) "
+                f"at {r.get('latitude')},{r.get('longitude')} "
+                f"in category {r.get('display_category')}"
+            )
         else:
             # species
-            grounding_lines.append(f"Species: {r.get('common_name')} ({r.get('scientific_name')}), count={r.get('total_count')}")
+            grounding_lines.append(
+                f"Species: {r.get('common_name')} ({r.get('scientific_name')}), "
+                f"count={r.get('total_count')}"
+            )
 
-    prompt = "You are an assistant answering questions about the TouchGrass tree dataset. Use the grounding data and the database rows to answer concisely.\n\n"
+    prompt = (
+        "You are an assistant answering questions about the TouchGrass tree dataset. "
+        "Use the grounding data and the database rows to answer concisely.\n\n"
+    )
     if grounding_lines:
         prompt += "Grounding data:\n" + "\n".join(grounding_lines) + "\n\n"
-    prompt += f"Question: {question}\nAnswer:" 
+    prompt += f"Question: {question}\nAnswer:"
 
     try:
         answer = _call_gemini(prompt)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"AI model call failed: {e}")
+        raise HTTPException(status_code=500, detail=f"AI model call failed: {e}") from e
 
     return ChatResponse(answer=answer, source_documents=[dict(r) for r in rows])

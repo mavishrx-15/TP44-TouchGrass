@@ -3,6 +3,7 @@
 # Loads touch_grass_map_data.json into the zones/trees/species tables.
 # Run schema.sql FIRST to create the tables before running this.
 
+import argparse
 import json
 import os
 from pathlib import Path
@@ -10,12 +11,17 @@ from pathlib import Path
 import psycopg2
 from psycopg2.extras import execute_values
 
-DATA_PATH = (
-    Path(__file__).resolve().parent.parent / "dataset" / "touch_grass_map_data.json"
-)
+DATA_PATH = Path(__file__).resolve().parent.parent / "dataset" / "touch_grass_map_data.json"
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--update-streets",
+        action="store_true",
+        help="Only update existing zone street names; preserve all other data",
+    )
+    args = parser.parse_args()
     # Prefer a single DATABASE_URL. If not provided, fall back to classic
     # PG* environment variables (PGHOST, PGPORT, PGDATABASE, PGUSER, PGPASSWORD).
     database_url = os.environ.get("DATABASE_URL")
@@ -41,6 +47,22 @@ def main():
         with DATA_PATH.open(encoding="utf-8") as f:
             data = json.load(f)
 
+        if args.update_streets:
+            updates = [
+                (z["cluster_id"], z["street_name"]) for z in data["zones"] if z.get("street_name")
+            ]
+            if updates:
+                execute_values(
+                    cur,
+                    """UPDATE zones AS z SET street_name = v.street_name
+                    FROM (VALUES %s) AS v(cluster_id, street_name)
+                    WHERE z.cluster_id = v.cluster_id""",
+                    updates,
+                )
+            conn.commit()
+            print(f"Updated street names for {len(updates)} zones; other data unchanged")
+            return
+
         zone_rows = [
             (
                 z["cluster_id"],
@@ -48,13 +70,14 @@ def main():
                 z["center_lon"],
                 z["tree_count"],
                 z["precinct"],
+                z.get("street_name"),
             )
             for z in data["zones"]
         ]
         execute_values(
             cur,
             """INSERT INTO zones
-               (cluster_id, center_lat, center_lon, tree_count, precinct)
+               (cluster_id, center_lat, center_lon, tree_count, precinct, street_name)
                VALUES %s""",
             zone_rows,
         )

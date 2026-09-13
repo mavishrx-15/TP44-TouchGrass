@@ -3,7 +3,7 @@
 Web app helping residents of low-canopy Melbourne suburbs find and reach tree-dense green
 spaces, using City of Melbourne Urban Forest open data.
 
-Group 44 · Iteration 1 scaffold.
+Group 44 — Iteration 1 scaffold.
 
 ## Layout
 
@@ -102,3 +102,9 @@ in the Technology Stack decision log.
 `.env` and `.env.local` are gitignored and must stay that way. Only `.env.example` is
 committed, with variable names and no values. Paid Google APIs are called from the
 backend; the browser only ever holds a referrer-restricted Maps key.
+
+## Epic 3 & 4
+
+See [implementation, configuration and database migration notes](docs/epic-3-4.md).
+The app now requires `ACCESS_PASSWORD` and a random `ACCESS_TOKEN_SECRET` (at least 32 bytes).
+Existing databases need the additive street-name migration before starting this backend.

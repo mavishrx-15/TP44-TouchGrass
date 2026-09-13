@@ -1,16 +1,16 @@
 from hmac import compare_digest
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.config import settings
-from app.security import create_access_token
+from app.security import create_access_token, ensure_access_configured
 
 router = APIRouter()
 
 
 class AccessVerifyRequest(BaseModel):
-    password: str
+    password: str = Field(max_length=1024)
 
 
 class AccessVerifyResponse(BaseModel):
@@ -20,9 +20,8 @@ class AccessVerifyResponse(BaseModel):
 
 @router.post("/verify", response_model=AccessVerifyResponse)
 def verify_access(request: AccessVerifyRequest) -> AccessVerifyResponse:
-    if not settings.access_password:
-        raise HTTPException(status_code=503, detail="Access password is not configured")
-    if not compare_digest(request.password, settings.access_password):
+    ensure_access_configured()
+    if not compare_digest(request.password.encode(), settings.access_password.encode()):
         raise HTTPException(status_code=401, detail="Incorrect password")
 
     return AccessVerifyResponse(

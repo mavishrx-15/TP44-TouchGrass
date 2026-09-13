@@ -1,3 +1,4 @@
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -11,8 +12,8 @@ class Settings(BaseSettings):
     database_url: str = ""
     google_maps_api_key: str = ""
     access_password: str = ""
-    access_token_secret: str = "change-me-in-development"
-    access_token_ttl_seconds: int = 3600
+    access_token_secret: str = ""
+    access_token_ttl_seconds: int = Field(default=3600, ge=60, le=86400)
 
     @property
     def cors_origin_list(self) -> list[str]:
