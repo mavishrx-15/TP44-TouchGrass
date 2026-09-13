@@ -10,6 +10,9 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:5173"
     database_url: str = ""
     google_maps_api_key: str = ""
+    access_password: str = ""
+    access_token_secret: str = "change-me-in-development"
+    access_token_ttl_seconds: int = 3600
 
     @property
     def cors_origin_list(self) -> list[str]:

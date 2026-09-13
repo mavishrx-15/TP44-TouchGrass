@@ -1,7 +1,8 @@
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
+from app.security import require_access_token
 
 app = FastAPI(title="TouchGrass API", version="0.1.0")
 
@@ -27,5 +28,11 @@ def health() -> dict[str, str]:
 
 # Register ai chat router
 from app.routers import ai_chat
+from app.routers import access
 
-app.include_router(ai_chat.router, prefix="/api/ai")
+app.include_router(access.router, prefix="/api/access")
+app.include_router(
+    ai_chat.router,
+    prefix="/api/ai",
+    dependencies=[Depends(require_access_token)],
+)
