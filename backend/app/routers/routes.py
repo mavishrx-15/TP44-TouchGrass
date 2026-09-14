@@ -465,6 +465,27 @@ def _duration_seconds(value: str) -> int:
     return round(float(value.removesuffix("s")))
 
 
+CORRIDOR_SAMPLE_POINTS = 120
+
+
+def _resample_path(
+    path: list[tuple[float, float]], max_points: int = CORRIDOR_SAMPLE_POINTS
+) -> list[tuple[float, float]]:
+    """Evenly-spaced subset of path points for the corridor membership check.
+
+    A 100m corridor doesn't need every polyline vertex checked - Google packs
+    one every few metres, so for a several-km route _near() was comparing
+    thousands of trees against a similar number of points (15s+ for a 5km
+    route). A few dozen evenly spaced points keep sub-100m spacing for
+    walking-scale routes without the O(trees x points) blowup; the bounding
+    box query above still uses the full path so it isn't narrowed by this.
+    """
+    if len(path) <= max_points:
+        return path
+    step = (len(path) - 1) / (max_points - 1)
+    return [path[round(i * step)] for i in range(max_points)]
+
+
 def _corridor(path: list[tuple[float, float]], session: SessionDep) -> Corridor:
     """Everything within 100m of the route: the trees, and the zones.
 
@@ -476,29 +497,33 @@ def _corridor(path: list[tuple[float, float]], session: SessionDep) -> Corridor:
     if not path:
         return Corridor(trees=0, park=0, high_pollen=0, canopy=0)
 
-    box = _bounding_box(path)
+    corridor_path = _resample_path(path)
+    boxes = _corridor_boxes(corridor_path)
+
+    tree_where, tree_params = _corridor_where(boxes, "latitude", "longitude", "t")
     trees = _near(
         session.execute(
             text(
-                """
+                f"""
                 SELECT latitude, longitude, located_in, display_category, family
                 FROM trees
-                WHERE latitude BETWEEN :south AND :north
-                  AND longitude BETWEEN :west AND :east
+                WHERE {tree_where}
                 """
             ),
-            box,
+            tree_params,
         ).all(),
-        path,
+        corridor_path,
         lambda row: (row.latitude, row.longitude),
     )
 
-    # Ranked across every zone before the bounding box narrows it down: a zone's
-    # percentile is a property of its precinct, not of this route's neighbours.
+    # Ranked across every zone before the corridor boxes narrow it down: a
+    # zone's percentile is a property of its precinct, not of this route's
+    # neighbours.
+    zone_where, zone_params = _corridor_where(boxes, "center_lat", "center_lon", "z")
     zones = _near(
         session.execute(
             text(
-                """
+                f"""
                 SELECT center_lat, center_lon, canopy_rank FROM (
                     SELECT center_lat, center_lon,
                            PERCENT_RANK() OVER (
@@ -506,13 +531,12 @@ def _corridor(path: list[tuple[float, float]], session: SessionDep) -> Corridor:
                            ) AS canopy_rank
                     FROM zones
                 ) ranked
-                WHERE center_lat BETWEEN :south AND :north
-                  AND center_lon BETWEEN :west AND :east
+                WHERE {zone_where}
                 """
             ),
-            box,
+            zone_params,
         ).all(),
-        path,
+        corridor_path,
         lambda row: (row.center_lat, row.center_lon),
     )
 
@@ -528,16 +552,44 @@ def _corridor(path: list[tuple[float, float]], session: SessionDep) -> Corridor:
     )
 
 
-def _bounding_box(path: list[tuple[float, float]]) -> dict[str, float]:
-    latitudes = [point[0] for point in path]
-    longitudes = [point[1] for point in path]
-    padding = 0.002  # ~200m, so the box covers the corridor at either end
-    return {
-        "south": min(latitudes) - padding,
-        "north": max(latitudes) + padding,
-        "west": min(longitudes) - padding,
-        "east": max(longitudes) + padding,
-    }
+def _corridor_boxes(path: list[tuple[float, float]]) -> list[dict[str, float]]:
+    """A small box around each sampled path point, instead of one box for
+    the whole route.
+
+    A single min/max bounding box over a long or diagonal route pulls in
+    every tree between its ends - for a 5km route that was ~29,000 trees
+    fetched (and then checked one by one against every path point in
+    Python) versus the low hundreds actually within 100m of the path. Many
+    small boxes, OR'd together in SQL, let the database do that narrowing
+    instead.
+    """
+    padding = 0.001  # ~110m: a bit more than TREE_CORRIDOR_M, trimmed exactly by _near()
+    return [
+        {"south": lat - padding, "north": lat + padding, "west": lng - padding, "east": lng + padding}
+        for lat, lng in path
+    ]
+
+
+def _corridor_where(
+    boxes: list[dict[str, float]], lat_col: str, lng_col: str, prefix: str
+) -> tuple[str, dict[str, float]]:
+    """An `OR`-of-ranges SQL clause covering every box, with bound params.
+
+    lat_col/lng_col are trusted column names from callers in this module,
+    not request input, so interpolating them is safe.
+    """
+    clauses = []
+    params: dict[str, float] = {}
+    for i, box in enumerate(boxes):
+        clauses.append(
+            f"({lat_col} BETWEEN :{prefix}_s{i} AND :{prefix}_n{i} "
+            f"AND {lng_col} BETWEEN :{prefix}_w{i} AND :{prefix}_e{i})"
+        )
+        params[f"{prefix}_s{i}"] = box["south"]
+        params[f"{prefix}_n{i}"] = box["north"]
+        params[f"{prefix}_w{i}"] = box["west"]
+        params[f"{prefix}_e{i}"] = box["east"]
+    return " OR ".join(clauses), params
 
 
 def _near(rows: list, path: list[tuple[float, float]], point) -> list:

@@ -147,8 +147,8 @@ watch(
 
 <template>
   <AppHeader />
-  <main class="map-page">
-    <div class="map-canvas">
+  <main id="main-content" tabindex="-1" class="map-page">
+    <div class="map-canvas" aria-label="Interactive tree map" role="region">
       <GoogleMapCanvas
         ref="mapCanvas"
         :center="selectedPrecinct.referencePoint"

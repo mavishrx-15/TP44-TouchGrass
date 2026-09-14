@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { Clock, Location, Warning, Headset, InfoFilled } from '@element-plus/icons-vue'
 import JourneyHeader from '@/components/JourneyHeader.vue'
@@ -8,10 +8,12 @@ import LeafIcon from '@/components/LeafIcon.vue'
 import LocationSearch from '@/components/LocationSearch.vue'
 import PreferenceInfo from '@/components/PreferenceInfo.vue'
 import { useJourneyStore } from '@/stores/journey'
+import { useAccessibilityStore } from '@/stores/accessibility'
 import type { Preferences } from '@/types/personalisation'
 import type { Precinct, RoutePlace } from '@/types/discovery'
 
 const journey = useJourneyStore()
+const accessibility = useAccessibilityStore()
 const router = useRouter()
 const locationInput = ref<InstanceType<typeof LocationSearch> | null>(null)
 const activeInfo = ref<'canopy' | 'shade' | null>(null)
@@ -92,12 +94,19 @@ function choosePrecinct(precinct: Precinct) {
   setOrigin({ id: precinct.id, label: precinct.name, coordinates: precinct.referencePoint })
 }
 onMounted(initialize)
+watch(
+  () => [locationError.value, journey.error, coverageNotice.value],
+  ([location, route, coverage]) => {
+    const message = location || route || coverage
+    if (message) accessibility.speak(message)
+  },
+)
 </script>
 
 <template>
   <JourneyHeader />
   <DemoNotice />
-  <main class="home-page">
+  <main id="main-content" tabindex="-1" class="home-page">
     <section class="home-hero">
       <div class="hero-copy">
         <span class="eyebrow">Less stress. More green.</span>

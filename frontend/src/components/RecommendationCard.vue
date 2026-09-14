@@ -9,33 +9,48 @@ const emit = defineEmits<{ navigate: [] }>()
 const mapError = ref('')
 const matched = computed(() => props.area.match.matches.filter((item) => item.matched))
 const partial = computed(() => props.area.match.matches.filter((item) => !item.matched))
+// Several zones in the same precinct can lack a nearestStreet, so their label
+// falls back to the precinct name alone (AC4) - multiple cards can then share
+// a heading. This adds a visible, non-invented distinguisher without changing
+// that shared label.
+const areaDistinguisher = computed(() =>
+  props.area.nearestStreet
+    ? null
+    : props.area.dominantGenus
+      ? `${props.area.dominantGenus} tree cluster`
+      : `${props.area.density}-density area`,
+)
 </script>
 <template>
   <article
     class="recommendation-card"
     :class="{ best }"
-    :aria-label="`${best ? 'Best match: ' : ''}${area.label}`"
+    :aria-label="`${best ? 'Best match: ' : ''}${area.label}${areaDistinguisher ? ` — ${areaDistinguisher}` : ''}`"
   >
     <div class="card-heading">
       <span v-if="best" class="best-badge">Best match</span>
       <h2>{{ area.label }}</h2>
+      <p v-if="areaDistinguisher" class="area-distinguisher">{{ areaDistinguisher }}</p>
       <p>
         {{ area.treeCount }} trees · {{ canopyLabel(area.metrics.canopy) }} canopy ·
         {{ area.distanceKm.toFixed(1) }} km · ~{{ area.estimatedMinutes }} min walk
       </p>
     </div>
     <div class="area-map">
-      <GoogleMapCanvas
-        :center="area.center"
-        :destination="area.center"
-        :trees="area.trees ?? []"
-        :zones="[area]"
-        :directions-open="false"
-        :route-options="[]"
-        :demo="USE_MOCK_DATA"
-        compact
-        @error="mapError = $event"
-      /><span v-if="mapError" class="thumbnail-error"
+      <div aria-hidden="true">
+        <GoogleMapCanvas
+          :center="area.center"
+          :destination="area.center"
+          :trees="area.trees ?? []"
+          :zones="[area]"
+          :directions-open="false"
+          :route-options="[]"
+          :demo="USE_MOCK_DATA"
+          compact
+          @error="mapError = $event"
+        />
+      </div>
+      <span v-if="mapError" class="thumbnail-error"
         >Map unavailable · {{ area.center.lat.toFixed(3) }}, {{ area.center.lng.toFixed(3) }}</span
       >
     </div>
@@ -177,6 +192,14 @@ h2 {
     serif;
   color: var(--tg-green-950);
   margin: 0 0 5px;
+}
+.card-heading > .area-distinguisher {
+  color: var(--tg-green-800);
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  margin: 0 0 6px;
 }
 .card-heading > p {
   color: var(--tg-muted);

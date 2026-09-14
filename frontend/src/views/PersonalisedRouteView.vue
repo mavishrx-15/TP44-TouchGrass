@@ -1,16 +1,18 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
-import { Location, Position, Refresh } from '@element-plus/icons-vue'
+import { computed, onMounted, ref, watch } from 'vue'
+import { Guide, Location, Position, Refresh, Van } from '@element-plus/icons-vue'
 import JourneyHeader from '@/components/JourneyHeader.vue'
 import DemoNotice from '@/components/DemoNotice.vue'
 import GoogleMapCanvas from '@/components/GoogleMapCanvas.vue'
 import LocationSearch from '@/components/LocationSearch.vue'
 import { useJourneyStore } from '@/stores/journey'
+import { useAccessibilityStore } from '@/stores/accessibility'
 import { USE_MOCK_DATA } from '@/services/personalisation.service'
 import { canopyLabel, noiseLabel } from '@/services/preferences'
 import type { RoutePlace } from '@/types/discovery'
 
 const journey = useJourneyStore()
+const accessibility = useAccessibilityStore()
 const locationError = ref('')
 const mapError = ref('')
 const locating = ref(false)
@@ -79,8 +81,9 @@ async function locate() {
 }
 async function updateRoute() {
   if (!journey.startLocation || !journey.destination) return
-  await journey.refreshAreas()
-  await journey.calculate()
+  // Areas only feed the map thumbnail/tree markers, not route scoring - run
+  // them alongside the route request instead of blocking on it first.
+  await Promise.all([journey.refreshAreas(), journey.calculate()])
 }
 async function setOrigin(value: RoutePlace | null) {
   journey.startLocation = value
@@ -99,8 +102,12 @@ onMounted(async () => {
       const permission = await navigator.permissions.query({ name: 'geolocation' })
       if (permission.state === 'granted') await journey.useCurrentLocation()
     }
-    if (journey.startLocation && !journey.areas.length) await journey.refreshAreas()
-    if (journey.startLocation && journey.destination && !journey.route) await journey.calculate()
+    await Promise.all([
+      journey.startLocation && !journey.areas.length ? journey.refreshAreas() : null,
+      journey.startLocation && journey.destination && !journey.route
+        ? journey.calculate()
+        : null,
+    ])
   } catch {
     locationError.value =
       'We couldn’t load location data. Search for a starting point or try again.'
@@ -108,12 +115,29 @@ onMounted(async () => {
     initialising.value = false
   }
 })
+watch(
+  () => journey.route,
+  (route) => {
+    if (!route) return
+    const mode = journey.travelMode === 'WALK' ? 'Walking route' : 'Transport route'
+    const sentence = route.match?.sentence ?? ''
+    accessibility.speak(
+      `${mode} found. ${route.distanceKm.toFixed(1)} kilometres, ${route.durationMinutes} minutes. ${sentence}`,
+    )
+  },
+)
+watch(
+  () => journey.error,
+  (message) => {
+    if (message) accessibility.speak(message)
+  },
+)
 </script>
 
 <template>
   <JourneyHeader />
   <DemoNotice />
-  <main class="personalised-page">
+  <main id="main-content" tabindex="-1" class="personalised-page">
     <section class="journey-map" aria-label="Your route map">
       <GoogleMapCanvas
         :center="center"
@@ -180,7 +204,7 @@ onMounted(async () => {
             :aria-pressed="journey.travelMode === 'WALK'"
             @click="journey.calculate('WALK')"
           >
-            <span aria-hidden="true">♧</span> Walking
+            <ElIcon><Guide /></ElIcon> Walking
           </button>
           <button
             type="button"
@@ -188,7 +212,7 @@ onMounted(async () => {
             :aria-pressed="journey.travelMode === 'TRANSIT'"
             @click="journey.calculate('TRANSIT')"
           >
-            <span aria-hidden="true">▤</span> Transport
+            <ElIcon><Van /></ElIcon> Transport
           </button>
         </div>
 
@@ -259,10 +283,6 @@ onMounted(async () => {
                 This preview selects one of {{ journey.route.candidateCount }} sample routes. Live
                 walking alternatives will be provided by Google when connected.
               </p>
-              <p v-else-if="journey.route.scoringPending">
-                Showing one live walking route from the existing route service. Tree count is a
-                provisional canopy proxy; full preference scoring is still being connected.
-              </p>
               <p v-else-if="journey.route.candidateCount > 1">
                 Chosen as the best match among {{ journey.route.candidateCount }} walking routes
                 Google found between these points — not a custom path built around this area.
@@ -272,7 +292,7 @@ onMounted(async () => {
                 shown above.
               </p>
               <p
-                v-if="journey.preferences.allergy && journey.route.scoringPending"
+                v-if="journey.preferences.allergy && journey.route.metrics?.lowAllergyShare == null"
                 class="allergy-explanation"
               >
                 Your allergy preference is saved, but allergy route scoring is not yet available.
@@ -447,8 +467,9 @@ h1 {
   font-size: 0.8rem;
   cursor: pointer;
 }
-.travel-toggle button span {
+.travel-toggle button .el-icon {
   margin-right: 7px;
+  vertical-align: -2px;
 }
 .travel-toggle button.active {
   background: white;

@@ -1,7 +1,12 @@
 import { apiGet, apiPost } from '@/api/client'
 import { distanceKm, getPlaceDetails, getPlaceSuggestions, getPrecincts } from './discovery.service'
 import { mockAreas, mockPlaces, mockPrecincts } from './personalisation.mock'
-import { COVERAGE_THRESHOLD_KM, scorePreferences, withinBudget } from './preferences'
+import {
+  COVERAGE_THRESHOLD_KM,
+  normalizeAreaMetrics,
+  scorePreferences,
+  withinBudget,
+} from './preferences'
 import type {
   Coordinates,
   PlaceSuggestion,
@@ -9,7 +14,6 @@ import type {
   RoutePlace,
   TreeRecord,
   TreeZone,
-  RouteOption,
 } from '@/types/discovery'
 import type {
   Area,
@@ -123,7 +127,7 @@ export async function loadAreas(precinct: Precinct): Promise<Area[]> {
       label: area.nearestStreet ? `${precinct.name} · ${area.nearestStreet}` : precinct.name,
       description: area.description ?? `${area.density}-density tree area.`,
       mapPosition: { x: 0, y: 0, width: 0, height: 0 },
-      metrics: area.metrics ?? {
+      metrics: normalizeAreaMetrics(area.metrics ?? null) ?? {
         canopy: { High: 0.9, Medium: 0.55, Low: 0.2 }[area.density],
         parkShare: complete
           ? records.filter((tree) => tree.locatedIn === 'Park').length / records.length
@@ -203,74 +207,10 @@ export async function requestPersonalisedRoute(
   area?: Area,
 ): Promise<PersonalisedRoute> {
   if (!USE_MOCK_DATA) {
-    type ApiRoute = Omit<RouteOption, 'id'> &
-      Partial<Omit<PersonalisedRoute, 'id'>> & { id: string }
-    const result = await apiPost<ApiRoute | ApiRoute[]>('/api/routes', input)
-    const routes = Array.isArray(result) ? result : [result]
-    if (!routes.length) throw new Error('No route was found. Try another destination.')
-    if (input.travelMode === 'TRANSIT') {
-      const transit = routes.find((route) => route.travelMode === 'TRANSIT')
-      // The old backend silently ignores travelMode. Never show its WALK result as TRANSIT.
-      if (!transit)
-        throw new Error(
-          'Transport is not supported by the current route service yet. Switch back to Walking, or open transport directions in Google Maps.',
-        )
-      return {
-        ...transit,
-        id: 'personalised',
-        travelMode: 'TRANSIT',
-        match: null,
-        metrics: null,
-        candidateCount: transit.candidateCount ?? 1,
-        message: transit.message ?? null,
-        isMock: false,
-      }
-    }
-    const ready = routes.find(
-      (route) => route.travelMode === 'WALK' && route.match && route.metrics,
-    )
-    if (ready && routes.length === 1)
-      return {
-        ...ready,
-        id: 'personalised',
-        travelMode: 'WALK',
-        match: ready.match!,
-        metrics: ready.metrics!,
-        candidateCount: ready.candidateCount ?? 1,
-        message: ready.message ?? null,
-        isMock: false,
-      }
-    const maxTrees = Math.max(1, ...routes.map((route) => route.treeCount))
-    const candidates: PersonalisedRoute[] = routes.map((route) => {
-      const metrics = {
-        canopy: route.treeCount / maxTrees,
-        parkShare: null,
-        lowAllergyShare: null,
-        highPollenTrees: null,
-      }
-      return {
-        ...route,
-        id: 'personalised',
-        label: 'Walking route',
-        travelMode: 'WALK',
-        match: scorePreferences(metrics, input.preferences, route.durationMinutes),
-        metrics,
-        candidateCount: routes.length,
-        message: null,
-        isMock: false,
-        scoringPending: true,
-      }
-    })
-    const chosen = chooseRoute(candidates, input.preferences)
-    return {
-      ...chosen,
-      message: [
-        chosen.message,
-        'Live Google walking route. Selection currently uses tree counts and walking time; shade, noise and allergy route scoring are not connected yet.',
-      ]
-        .filter(Boolean)
-        .join(' '),
-    }
+    // /api/routes now returns one already-scored route; WALK carries match/metrics,
+    // TRANSIT carries neither (no environmental claims for transport).
+    const route = await apiPost<Omit<PersonalisedRoute, 'isMock'>>('/api/routes', input)
+    return { ...route, metrics: normalizeAreaMetrics(route.metrics), isMock: false }
   }
   await pause(650)
   const km = distanceKm(input.origin, input.destination)

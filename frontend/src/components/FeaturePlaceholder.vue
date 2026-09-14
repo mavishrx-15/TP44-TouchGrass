@@ -10,7 +10,7 @@ defineProps<{
 </script>
 
 <template>
-  <main class="feature-page">
+  <main id="main-content" tabindex="-1" class="feature-page">
     <div class="feature-orb orb-one" />
     <div class="feature-orb orb-two" />
     <section class="page-container feature-content">

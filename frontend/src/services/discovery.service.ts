@@ -38,11 +38,13 @@ export async function getWalkingRoutes(
   destination: Coordinates,
   signal?: AbortSignal,
 ): Promise<RouteOption[]> {
-  // Legacy map adapter until the shared backend returns the new single-route contract.
-  const routes = await apiPost<RouteOption[]>('/api/routes', { origin, destination }, signal)
-  return routes
-    .slice(0, 1)
-    .map((route) => ({ ...route, id: 'personalised', label: 'Walking route' }))
+  // /api/routes now returns one scored route object, not a Fastest/Tree-Dense pair.
+  const route = await apiPost<RouteOption>(
+    '/api/routes',
+    { origin, destination, travelMode: 'WALK' },
+    signal,
+  )
+  return [{ ...route, id: 'personalised', label: 'Walking route' }]
 }
 
 export function getPlaceSuggestions(

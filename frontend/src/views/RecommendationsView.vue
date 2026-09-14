@@ -1,12 +1,14 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import JourneyHeader from '@/components/JourneyHeader.vue'
 import DemoNotice from '@/components/DemoNotice.vue'
 import RecommendationCard from '@/components/RecommendationCard.vue'
 import { useJourneyStore } from '@/stores/journey'
+import { useAccessibilityStore } from '@/stores/accessibility'
 import type { Recommendation } from '@/types/personalisation'
 const journey = useJourneyStore()
+const accessibility = useAccessibilityStore()
 const router = useRouter()
 const navigating = ref<string | null>(null)
 async function navigate(area: Recommendation) {
@@ -19,10 +21,20 @@ async function navigate(area: Recommendation) {
 onMounted(async () => {
   if (journey.startLocation) await journey.refreshAreas()
 })
+watch(
+  () => journey.recommendations,
+  (list) => {
+    if (!list.length) return
+    const best = list[0]!
+    accessibility.speak(
+      `Found ${Math.min(3, list.length)} areas. Best match: ${best.label}. ${best.match.sentence}`,
+    )
+  },
+)
 </script>
 <template>
   <JourneyHeader /><DemoNotice />
-  <main class="recommendations-page">
+  <main id="main-content" tabindex="-1" class="recommendations-page">
     <RouterLink class="back-link" to="/explore">‹ &nbsp; Back to your route</RouterLink>
     <header class="recommendations-heading">
       <span class="eyebrow"

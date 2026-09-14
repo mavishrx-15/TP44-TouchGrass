@@ -39,6 +39,48 @@ it('loads existing precinct and Google Places APIs instead of fixture locations'
   expect(get).toHaveBeenLastCalledWith('/api/places/autocomplete?query=Real', undefined)
 })
 
+it('wraps the legacy map adapter single-object /api/routes response in an array', async () => {
+  post.mockResolvedValueOnce({
+    id: 'personalised',
+    label: 'Walking route',
+    durationMinutes: 8,
+    distanceKm: 0.6,
+    treeCount: 10,
+    encodedPolyline: 'live-route',
+  })
+  const { getWalkingRoutes } = await import('@/services/discovery.service')
+  const result = await getWalkingRoutes(precinct.referencePoint, { lat: -37.79, lng: 144.94 })
+  expect(result).toEqual([
+    {
+      id: 'personalised',
+      label: 'Walking route',
+      durationMinutes: 8,
+      distanceKm: 0.6,
+      treeCount: 10,
+      encodedPolyline: 'live-route',
+    },
+  ])
+  expect(post).toHaveBeenLastCalledWith(
+    '/api/routes',
+    { origin: precinct.referencePoint, destination: { lat: -37.79, lng: 144.94 }, travelMode: 'WALK' },
+    undefined,
+  )
+})
+
+it('normalises live /api/zones metrics from a 0-100 score to a 0-1 fraction', async () => {
+  get.mockImplementation((path: string) =>
+    Promise.resolve(
+      path.startsWith('/api/zones')
+        ? [{ ...zone, metrics: { canopy: 63, parkShare: 4, lowAllergyShare: null, highPollenTrees: null } }]
+        : [],
+    ),
+  )
+  const { loadAreas } = await import('@/services/personalisation.service')
+  const result = await loadAreas(precinct)
+  expect(result[0]?.metrics.canopy).toBeCloseTo(0.63)
+  expect(result[0]?.metrics.parkShare).toBeCloseTo(0.04)
+})
+
 it('accepts the existing zones/trees contract without inventing new fields', async () => {
   get.mockImplementation((path: string) =>
     Promise.resolve(
@@ -78,25 +120,23 @@ it('accepts the existing zones/trees contract without inventing new fields', asy
   expect(result[0]?.trees).toHaveLength(2)
 })
 
-it('preserves live route geometry, distance and time while choosing one legacy alternative', async () => {
-  post.mockResolvedValue([
-    {
-      id: 'fastest',
-      label: 'Fastest Route',
-      durationMinutes: 8,
-      distanceKm: 0.6,
-      treeCount: 10,
-      encodedPolyline: 'live-fastest',
-    },
-    {
-      id: 'green',
-      label: 'Tree-Dense Route',
-      durationMinutes: 12,
-      distanceKm: 0.9,
-      treeCount: 50,
-      encodedPolyline: 'live-green',
-    },
-  ])
+it('normalises the backend\'s 0-100 metrics scale to the 0-1 fractions the UI expects', async () => {
+  // Real backend response shape (verified against the live API): canopy/parkShare
+  // are a 0-100 score ("canopy 63, parkShare 4"), not the 0-1 fraction every
+  // frontend threshold assumes.
+  post.mockResolvedValueOnce({
+    id: 'personalised',
+    label: 'Personalised walking route',
+    travelMode: 'WALK',
+    durationMinutes: 12,
+    distanceKm: 0.9,
+    treeCount: 50,
+    encodedPolyline: 'live-route',
+    metrics: { canopy: 63, parkShare: 4, lowAllergyShare: null, highPollenTrees: null },
+    match: { score: 24, matches: [], sentence: 'Matches your tree canopy.' },
+    candidateCount: 2,
+    message: null,
+  })
   const { requestPersonalisedRoute } = await import('@/services/personalisation.service')
   const input = {
     origin: precinct.referencePoint,
@@ -110,13 +150,37 @@ it('preserves live route geometry, distance and time while choosing one legacy a
     id: 'personalised',
     durationMinutes: 12,
     distanceKm: 0.9,
-    encodedPolyline: 'live-green',
+    encodedPolyline: 'live-route',
     isMock: false,
-    scoringPending: true,
+    candidateCount: 2,
   })
-  expect(result.path).toBeUndefined()
-  expect(result.metrics?.parkShare).toBeNull()
-  await expect(requestPersonalisedRoute({ ...input, travelMode: 'TRANSIT' })).rejects.toThrow(
-    'Transport is not supported',
-  )
+  expect(result.metrics?.canopy).toBeCloseTo(0.63)
+  expect(result.metrics?.parkShare).toBeCloseTo(0.04)
+  expect(post).toHaveBeenLastCalledWith('/api/routes', input)
+})
+
+it('never shows environmental scoring for a TRANSIT route', async () => {
+  post.mockResolvedValueOnce({
+    id: 'personalised',
+    label: 'Transport route',
+    travelMode: 'TRANSIT',
+    durationMinutes: 15,
+    distanceKm: 1.1,
+    treeCount: 50,
+    metrics: null,
+    match: null,
+    candidateCount: 1,
+    message: null,
+  })
+  const { requestPersonalisedRoute } = await import('@/services/personalisation.service')
+  const result = await requestPersonalisedRoute({
+    origin: precinct.referencePoint,
+    destination: { lat: -37.79, lng: 144.94 },
+    precinctId: 'kensington',
+    travelMode: 'TRANSIT',
+    preferences: { canopy: 100, shade: null, noise: null, allergy: null, walkingTime: null },
+  })
+  expect(result.metrics).toBeNull()
+  expect(result.match).toBeNull()
+  expect(result.treeCount).toBe(50)
 })

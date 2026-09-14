@@ -34,13 +34,34 @@ Desktop recommendations have three columns. Below 760px, all three remain fully
 expanded in one column with an explicit area count. The route map and panel stack
 on mobile; controls remain touch-sized. No separate Area Details page exists.
 
-## Proposed backend handoff (not yet implemented)
+## Proposed backend handoff
 
 Keep `VITE_USE_MOCK_DATA=false` for normal development. The live adapter supports
-the CURRENT backend as well as the proposed enriched responses below; missing new
+the CURRENT backend as well as the enriched responses below; missing new
 fields do not prevent real maps/routes from working. There is no silent fixture
 fallback if a real request fails. Set `VITE_MOCK_ACCESS=false` once the real access
 verification endpoint is deployed.
+
+Status from the `zone-nearest-street` backend branch (43 tests green; must merge
+after `gin/update-schema` or `/api/zones` 500s):
+
+- **Done** — `/api/zones` returns `nearestStreet: string | null` (96% populated;
+  75 park-centred zones stay null by design).
+- **Done** — `/api/routes` returns one scored route object (not an array); WALK
+  carries `metrics`/`match`, TRANSIT carries neither. `travelMode` is now a real
+  request field. `precinctId` stays optional so iteration-1 callers still work.
+  The live adapters in `personalisation.service.ts` and `discovery.service.ts`
+  were updated to consume the single-object response.
+- **Still pending** — `/api/zones` `metrics`, `genera`, `dataNotes`. The frontend
+  already falls back to a client-computed approximation when these are absent
+  (`personalisation.service.ts`'s `loadAreas`), so no frontend change is needed
+  when they land — real values just take over automatically.
+- **Needs team sign-off, not a frontend blocker** — allergy genus classification
+  (proposed: high = Platanus, Ulmus, Quercus, Casuarina, Allocasuarina;
+  low = Eucalyptus, Corymbia, Acacia) and the canopy full-mark threshold
+  (proposed: 800 trees/km). Until decided, `lowAllergyShare`/`highPollenTrees`
+  stay `null` and the UI already renders that as "not yet available", never as
+  a non-match.
 
 Current-backend compatibility:
 

@@ -73,6 +73,7 @@ export const useJourneyStore = defineStore('journey', () => {
   const cache = new Map<string, PersonalisedRoute>()
   let sequence = 0
   let areaSequence = 0
+  let loadedPrecinctId: string | null = null
   let initPromise: Promise<void> | null = null
 
   function initialize() {
@@ -122,15 +123,21 @@ export const useJourneyStore = defineStore('journey', () => {
 
   async function refreshAreas() {
     const request = ++areaSequence
-    areasLoading.value = true
-    areaError.value = null
-    areas.value = []
     try {
       await initialize()
       const precinct = coverage.value?.precinct
       if (!precinct) throw new Error('Choose a starting location to find nearby areas.')
+      // Zones/trees for a precinct don't change within a session - skip the
+      // (expensive) refetch when the destination just moves within the same one.
+      if (precinct.id === loadedPrecinctId && areas.value.length) return
+      areasLoading.value = true
+      areaError.value = null
+      areas.value = []
       const result = await loadAreas(precinct)
-      if (request === areaSequence) areas.value = result
+      if (request === areaSequence) {
+        areas.value = result
+        loadedPrecinctId = precinct.id
+      }
     } catch (e) {
       if (request === areaSequence)
         areaError.value = e instanceof Error ? e.message : 'Areas could not be loaded.'

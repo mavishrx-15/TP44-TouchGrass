@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { useRoute } from 'vue-router'
 import LeafIcon from './LeafIcon.vue'
+import BlindModeToggle from './BlindModeToggle.vue'
 const route = useRoute()
 </script>
 <template>
+  <a class="skip-link" href="#main-content">Skip to main content</a>
   <header class="journey-header">
     <RouterLink class="journey-brand" to="/" aria-label="TouchGrass home"
       ><span><LeafIcon /></span>TouchGrass</RouterLink
@@ -14,6 +16,7 @@ const route = useRoute()
         >Explore</RouterLink
       >
     </nav>
+    <BlindModeToggle />
   </header>
 </template>
 <style scoped>

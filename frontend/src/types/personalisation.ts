@@ -60,7 +60,6 @@ export interface PersonalisedRoute extends RouteOption {
   candidateCount: number
   message: string | null
   isMock: boolean
-  scoringPending?: boolean
   path?: Coordinates[]
 }
 export interface PersonalisedRequest {

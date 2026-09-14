@@ -8,6 +8,21 @@ import type {
 // Prototype rules pending backend agreement; used by mock areas AND mock routes.
 export const WALKING_TOLERANCE_MINUTES = 2
 export const COVERAGE_THRESHOLD_KM = 5
+
+// The backend reports canopy/parkShare/lowAllergyShare as a 0-100 score
+// ("canopy 63, parkShare 4"); every threshold and mock value here is a 0-1
+// fraction. Normalise once at the API boundary rather than rescale every
+// consumer. highPollenTrees is a raw tree count, not a share - left as-is.
+export function normalizeAreaMetrics<T extends AreaMetrics | null>(raw: T): T {
+  if (!raw) return raw
+  const toFraction = (value: number | null) => (value === null ? null : value / 100)
+  return {
+    ...raw,
+    canopy: toFraction(raw.canopy),
+    parkShare: toFraction(raw.parkShare),
+    lowAllergyShare: toFraction(raw.lowAllergyShare),
+  }
+}
 export const canopyLabel = (score: number | null) =>
   score === null ? 'Not available' : score >= 0.75 ? 'High' : score >= 0.4 ? 'Medium' : 'Low'
 export const shadeLabel = (share: number | null) =>
