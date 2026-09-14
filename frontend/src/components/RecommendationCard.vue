@@ -41,7 +41,7 @@ const areaDistinguisher = computed(() =>
         <GoogleMapCanvas
           :center="area.center"
           :destination="area.center"
-          :trees="area.trees ?? []"
+          :trees="[]"
           :zones="[area]"
           :directions-open="false"
           :route-options="[]"
@@ -208,7 +208,7 @@ h2 {
   line-height: 1.6;
 }
 .area-map {
-  height: 115px;
+  height: 170px;
   position: relative;
   overflow: hidden;
   border-radius: 10px;
@@ -367,7 +367,7 @@ h3 {
     font-size: 0.79rem;
   }
   .area-map {
-    height: 140px;
+    height: 190px;
   }
   .preference-chip {
     font-size: 0.67rem;

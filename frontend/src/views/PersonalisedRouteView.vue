@@ -5,11 +5,13 @@ import JourneyHeader from '@/components/JourneyHeader.vue'
 import DemoNotice from '@/components/DemoNotice.vue'
 import GoogleMapCanvas from '@/components/GoogleMapCanvas.vue'
 import LocationSearch from '@/components/LocationSearch.vue'
+import MapFiltersPanel from '@/components/MapFiltersPanel.vue'
 import { useJourneyStore } from '@/stores/journey'
 import { useAccessibilityStore } from '@/stores/accessibility'
 import { USE_MOCK_DATA } from '@/services/personalisation.service'
+import { getSpecies } from '@/services/discovery.service'
 import { canopyLabel, noiseLabel } from '@/services/preferences'
-import type { RoutePlace } from '@/types/discovery'
+import type { DensityTier, RoutePlace, TreeGenus } from '@/types/discovery'
 
 const journey = useJourneyStore()
 const accessibility = useAccessibilityStore()
@@ -17,6 +19,30 @@ const locationError = ref('')
 const mapError = ref('')
 const locating = ref(false)
 const initialising = ref(false)
+const densityFilters = ref<DensityTier[]>(['High', 'Medium', 'Low'])
+const genusFilters = ref<TreeGenus[]>([])
+const genusOptions = ref<TreeGenus[]>([])
+const visibleZones = computed(() =>
+  journey.areas.filter((area) => densityFilters.value.includes(area.density)),
+)
+// Matches the legacy map's own tree cap: each marker is a real DOM element
+// (AdvancedMarkerElement), and areas here carry up to 5000 trees each for
+// per-zone stats accuracy - rendering all of them at once is what froze the
+// page. 500 mirrors what /api/trees?...&limit=500 already caps MapView to.
+const VISIBLE_TREE_LIMIT = 500
+const visibleTrees = computed(() =>
+  journey.areas
+    .flatMap((area) =>
+      (area.trees ?? []).filter(
+        (tree) => !genusFilters.value.length || genusFilters.value.includes(tree.genus),
+      ),
+    )
+    .slice(0, VISIBLE_TREE_LIMIT),
+)
+function resetMapFilters() {
+  densityFilters.value = ['High', 'Medium', 'Low']
+  genusFilters.value = []
+}
 const center = computed(
   () =>
     journey.destination?.coordinates ??
@@ -96,6 +122,13 @@ async function setDestination(value: RoutePlace | null) {
 }
 onMounted(async () => {
   initialising.value = true
+  getSpecies()
+    .then((species) => {
+      genusOptions.value = species.map((item) => item.genus)
+    })
+    .catch(() => {
+      /* Genus filter list is a nice-to-have; the map still works without it. */
+    })
   try {
     await journey.initialize()
     if (!journey.startLocation && navigator.permissions) {
@@ -141,15 +174,22 @@ watch(
     <section class="journey-map" aria-label="Your route map">
       <GoogleMapCanvas
         :center="center"
-        :trees="journey.selectedArea?.trees ?? []"
-        :zones="journey.selectedArea ? [journey.selectedArea] : []"
+        :trees="visibleTrees"
+        :zones="visibleZones"
         :directions-open="!!journey.route"
         :route-options="journey.route ? [journey.route] : []"
         :origin="journey.startLocation?.coordinates"
         :destination="journey.destination?.coordinates"
         :preview-path="journey.route?.path"
         :demo="USE_MOCK_DATA"
+        :auto-center="false"
         @error="mapError = $event"
+      />
+      <MapFiltersPanel
+        v-model:densities="densityFilters"
+        v-model:genera="genusFilters"
+        :genus-options="genusOptions"
+        @reset="resetMapFilters"
       />
       <span class="personalised-badge">✓ Personalised</span>
       <div class="journey-input-panel">
@@ -363,8 +403,8 @@ watch(
 }
 .personalised-badge {
   position: absolute;
-  top: 24px;
-  left: 20px;
+  bottom: 24px;
+  right: 20px;
   background: white;
   border: 1px solid var(--tg-border);
   border-radius: 8px;
@@ -649,8 +689,8 @@ h1 {
     top: 67px;
   }
   .personalised-badge {
-    left: 18px;
-    top: 16px;
+    right: 18px;
+    bottom: 16px;
     padding: 7px 10px;
   }
 }

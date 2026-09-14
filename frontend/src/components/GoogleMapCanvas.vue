@@ -14,6 +14,11 @@ const props = defineProps<{
   previewPath?: Coordinates[]
   demo?: boolean
   compact?: boolean
+  // Recentring and resetting zoom every time `center` moves fights any
+  // manual pan/zoom once the map is showing a whole area, not just one
+  // destination pin. Defaults to the existing behaviour for callers that
+  // rely on it (MapView's search bar, the recommendation card thumbnail).
+  autoCenter?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -179,10 +184,23 @@ async function renderEndpoints() {
     const content = document.createElement('span')
     content.className =
       title === 'Starting location' ? 'journey-origin-marker' : 'journey-destination-marker'
+    // AdvancedMarkerElement's own `title` sets the accessible name but,
+    // unlike the legacy Marker, doesn't show a hover tooltip - the DOM
+    // element's native `title` attribute is what actually renders one.
+    content.title = title
     endpointMarkers.push(new AdvancedMarkerElement({ map: map.value, position, title, content }))
   }
-  if (!props.routeOptions.length && !bounds.isEmpty())
+  if (!props.routeOptions.length && !bounds.isEmpty()) {
+    // fitBounds on a single point (the common case here: just a destination,
+    // no origin) zooms in as far as possible - a card thumbnail ends up
+    // showing nothing but a solid green blob. Cap it back to a level that
+    // still reads as "a neighbourhood", same as a real two-point fit would.
+    const maxZoom = props.compact ? 15 : 16
+    google.maps.event.addListenerOnce(map.value, 'bounds_changed', () => {
+      if ((map.value?.getZoom() ?? 0) > maxZoom) map.value?.setZoom(maxZoom)
+    })
     map.value.fitBounds(bounds, props.compact ? 30 : 90)
+  }
 }
 
 function decodePolyline(encoded: string): google.maps.LatLngLiteral[] {
@@ -275,7 +293,9 @@ onMounted(async () => {
 
 watch(
   () => props.center,
-  () => resetView(),
+  () => {
+    if (props.autoCenter !== false) resetView()
+  },
   { deep: true },
 )
 watch(() => props.trees, renderMarkers, { deep: true })

@@ -134,6 +134,15 @@ watch(
     </section>
 
     <form class="home-form" :aria-busy="submitting" @submit.prevent="continueToRoute">
+      <aside class="context-note">
+        <ElIcon><InfoFilled /></ElIcon>
+        <p>
+          Google Maps treats all green space the same. A quiet, tree-dense street can look
+          identical to a busy, grassy playground, despite offering a completely different
+          experience. Tree canopies are what cools the air, reduces noise, and can help ease
+          stress, not grass or open lawn.
+        </p>
+      </aside>
       <div class="preferences-banner">
         <span class="section-icon"><LeafIcon /></span>
         <div>
@@ -402,6 +411,27 @@ h1 {
 .home-form {
   width: min(850px, calc(100% - 48px));
   margin: 22px auto 0;
+}
+.context-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  max-width: 560px;
+  margin: 0 0 20px;
+  padding: 0 0 0 14px;
+  border-left: 2px solid var(--tg-green-700);
+}
+.context-note .el-icon {
+  flex: 0 0 auto;
+  margin-top: 2px;
+  color: var(--tg-green-700);
+  font-size: 0.95rem;
+}
+.context-note p {
+  margin: 0;
+  font-size: 0.76rem;
+  line-height: 1.5;
+  color: var(--tg-muted);
 }
 .preferences-banner {
   display: flex;
