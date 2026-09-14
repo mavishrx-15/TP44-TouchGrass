@@ -1,6 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import { getAccessToken, watchAccessExpiry } from '@/api/client'
 import HomeView from '@/views/HomeView.vue'
-import { getAccessToken } from '@/services/access.service'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -49,5 +49,11 @@ router.beforeEach((to) => {
     return { name: 'access', query: { redirect: to.fullPath }, replace: true }
   if (to.name === 'access' && unlocked) return { name: 'home', replace: true }
 })
+window.addEventListener('access-expired', () => {
+  if (router.currentRoute.value.name !== 'access') {
+    void router.replace({ name: 'access', query: { redirect: router.currentRoute.value.fullPath } })
+  }
+})
+watchAccessExpiry()
 
 export default router

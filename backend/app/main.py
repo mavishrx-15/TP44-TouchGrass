@@ -1,10 +1,11 @@
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
 from app.config import settings
 from app.db import SessionDep
-from app.routers import map_data, routes
+from app.routers import access, ai_chat, map_data, routes
+from app.security import require_access_token
 
 app = FastAPI(title="TouchGrass API", version="0.1.0")
 
@@ -22,7 +23,7 @@ def health() -> dict[str, str]:
     return {"status": "ok", "service": "touchgrass-api"}
 
 
-@app.get("/api/db-check")
+@app.get("/api/db-check", dependencies=[Depends(require_access_token)])
 def db_check(session: SessionDep) -> dict[str, object]:
     """Proves the API can reach the database, without going through a query.
 
@@ -33,5 +34,10 @@ def db_check(session: SessionDep) -> dict[str, object]:
     return {"db": "connected", "result": result}
 
 
-app.include_router(map_data.router, prefix="/api")
-app.include_router(routes.router, prefix="/api")
+app.include_router(access.router, prefix="/api/access")
+for feature, prefix in (
+    (map_data.router, "/api"),
+    (routes.router, "/api"),
+    (ai_chat.router, "/api/ai"),
+):
+    app.include_router(feature, prefix=prefix, dependencies=[Depends(require_access_token)])

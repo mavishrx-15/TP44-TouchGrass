@@ -20,8 +20,10 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from app.config import settings
 from app.db import get_session
 from app.main import app
+from app.security import create_access_token
 
 SCHEMA = Path(__file__).resolve().parent.parent / "database" / "schema.sql"
 
@@ -92,7 +94,12 @@ TREES = [
 
 
 @pytest.fixture
-def client(tmp_path: Path) -> Iterator[TestClient]:
+def client(tmp_path: Path, monkeypatch) -> Iterator[TestClient]:
+    # Every router but /api/access is gated behind require_access_token now;
+    # give tests a valid token by default so only the access tests themselves
+    # need to think about auth. access_token_secret must be >=32 bytes.
+    monkeypatch.setattr(settings, "access_password", "test-password")
+    monkeypatch.setattr(settings, "access_token_secret", "test-secret-32-bytes-minimum!!!!")
     db = tmp_path / "test.db"
     raw = sqlite3.connect(db)
     raw.executescript(SCHEMA.read_text())
@@ -109,5 +116,7 @@ def client(tmp_path: Path) -> Iterator[TestClient]:
             yield session
 
     app.dependency_overrides[get_session] = override
-    yield TestClient(app)
+    test_client = TestClient(app)
+    test_client.headers["Authorization"] = f"Bearer {create_access_token()}"
+    yield test_client
     app.dependency_overrides.clear()

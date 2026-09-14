@@ -27,7 +27,6 @@ import type {
 // Existing maps, Places, zones and walking routes are LIVE by default.
 // Fully mocked data is an explicit fixture mode for isolated UI tests only.
 export const USE_MOCK_DATA = import.meta.env.VITE_USE_MOCK_DATA === 'true'
-export const MOCK_ACCESS = USE_MOCK_DATA || import.meta.env.VITE_MOCK_ACCESS !== 'false'
 export const pause = (ms = 450) => new Promise<void>((resolve) => setTimeout(resolve, ms))
 
 export async function loadPrecincts(): Promise<Precinct[]> {

@@ -36,6 +36,7 @@ weights/
 # tool caches
 .ruff_cache/
 .pytest_cache/
+.pytest_tmp/
 
 # course governance documents — submitted via Moodle/Drive, not the repo
 (TouchGrass) Project Governance Portfolio*

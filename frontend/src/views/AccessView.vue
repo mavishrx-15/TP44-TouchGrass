@@ -2,8 +2,7 @@
 import { onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import LeafIcon from '@/components/LeafIcon.vue'
-import { DEMO_PASSWORD, verifyAccess } from '@/services/access.service'
-import { MOCK_ACCESS } from '@/services/personalisation.service'
+import { apiPost, ApiError, setAccessToken } from '@/api/client'
 const password = ref('')
 const error = ref('')
 const busy = ref(false)
@@ -20,7 +19,10 @@ async function unlock() {
   error.value = ''
   busy.value = true
   try {
-    await verifyAccess(password.value)
+    const result = await apiPost<{ token: string }>('/api/access/verify', {
+      password: password.value,
+    })
+    setAccessToken(result.token)
     password.value = ''
     const target =
       typeof route.query.redirect === 'string' &&
@@ -31,7 +33,10 @@ async function unlock() {
         : '/'
     await router.replace(target)
   } catch (e) {
-    error.value = e instanceof Error ? e.message : 'Please try again.'
+    error.value =
+      e instanceof ApiError && e.status === 401
+        ? 'That password isn’t right. Please try again.'
+        : 'We couldn’t verify access right now. Please try again shortly.'
     input.value?.focus()
   } finally {
     busy.value = false
@@ -66,10 +71,6 @@ onMounted(() => input.value?.focus())
           {{ busy ? 'Checking…' : 'Enter TouchGrass →' }}
         </button>
       </form>
-      <p v-if="MOCK_ACCESS" class="access-demo">
-        Prototype access · Use <code>{{ DEMO_PASSWORD }}</code
-        ><br />This demo gate does not secure live data.
-      </p>
       <small>Access is remembered in this tab for up to one hour.</small>
     </section>
     <p class="access-tagline">Small changes. A bigger impact.</p>
@@ -144,13 +145,6 @@ input {
   border: 1px solid var(--tg-border);
   padding: 0 12px;
   background: var(--tg-cream);
-}
-.access-demo {
-  background: var(--tg-warning-soft);
-  color: #74602c;
-  border-radius: 9px;
-  padding: 12px;
-  font-size: 0.8rem;
 }
 small {
   color: var(--tg-muted);

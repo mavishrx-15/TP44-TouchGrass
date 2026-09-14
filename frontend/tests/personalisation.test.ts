@@ -11,7 +11,6 @@ import {
 import { mockAreas, mockPrecincts } from '@/services/personalisation.mock'
 import { distanceKm } from '@/services/discovery.service'
 import { useJourneyStore } from '@/stores/journey'
-import { DEMO_PASSWORD, getAccessToken, verifyAccess } from '@/services/access.service'
 
 beforeEach(() => {
   const memory = new Map<string, string>()
@@ -170,13 +169,5 @@ describe('session and preferences', () => {
     setActivePinia(createPinia())
     expect(useJourneyStore().startLocation?.label).toBe('Kensington')
     expect(useJourneyStore().preferences.walkingTime).toBe(15)
-  })
-  it('rejects incorrect access, restores a session, and re-locks when storage is cleared', async () => {
-    await expect(verifyAccess('wrong')).rejects.toThrow('isn’t right')
-    expect(getAccessToken()).toBeNull()
-    await verifyAccess(DEMO_PASSWORD)
-    expect(getAccessToken()).toMatch(/^demo-/)
-    sessionStorage.clear()
-    expect(getAccessToken()).toBeNull()
   })
 })
