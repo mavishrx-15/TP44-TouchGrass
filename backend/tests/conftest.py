@@ -20,31 +20,39 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from app.config import settings
 from app.db import get_session
 from app.main import app
+from app.security import create_access_token
 
 SCHEMA = Path(__file__).resolve().parent.parent / "database" / "schema.sql"
 
 # cluster_id is the rounded centre of a 0.001-degree cell, so these ids also
 # fix where each zone's square lies.
+# street_name is nullable: enrich_zones.py leaves it empty for a zone centred
+# in a park or reserve, with no road near enough to reverse-geocode. The last
+# row is that case, so the API contract is exercised both ways.
 ZONES = [
-    # cluster_id,          lat,      lon,       tree_count, precinct
-    ("-37.795_144.915", -37.795, 144.915, 38, "Kensington"),  # High: boundary
-    ("-37.796_144.916", -37.796, 144.916, 37, "Kensington"),  # Medium: boundary
-    ("-37.797_144.917", -37.797, 144.917, 10, "Kensington"),  # Medium: boundary
-    ("-37.798_144.918", -37.798, 144.918, 9, "Kensington"),  # Low: boundary
-    ("-37.800_144.960", -37.800, 144.960, 50, "Carlton"),  # all trees "Other"
+    # cluster_id,          lat,      lon,       tree_count, precinct, street_name
+    ("-37.795_144.915", -37.795, 144.915, 38, "Kensington", "Macaulay Road"),  # High: boundary
+    ("-37.796_144.916", -37.796, 144.916, 37, "Kensington", "Bellair Street"),  # Medium: boundary
+    ("-37.797_144.917", -37.797, 144.917, 10, "Kensington", "Rankins Road"),  # Medium: boundary
+    ("-37.798_144.918", -37.798, 144.918, 9, "Kensington", "Altona Street"),  # Low: boundary
+    ("-37.800_144.960", -37.800, 144.960, 50, "Carlton", None),  # all trees "Other"
 ]
 
 
-def _tree(com_id, zone, precinct, genus, sci, located_in, year):
+def _tree(com_id, zone, precinct, genus, sci, located_in, year, family="Myrtaceae"):
     lat, lon = float(zone.split("_")[0]), float(zone.split("_")[1])
     return (
         com_id,
         "Yellow Box",
         sci,
-        "Myrtaceae",
-        "Myrtaceae",
+        family,
+        # family_display_category files anything outside the nine display
+        # genera under "Other" — including the two families the high-pollen
+        # proxy names, which is why that rule reads the raw family column.
+        "Other" if family != "Myrtaceae" else "Myrtaceae",
         lat,
         lon,
         genus,
@@ -70,15 +78,32 @@ TREES = [
     # A zone holding nothing but "Other" gets no dominantGenus.
     _tree(6, "-37.800_144.960", "Carlton", "Other", "Ficus macrophylla", "Park", "1998"),
     _tree(7, "-37.800_144.960", "Carlton", "Other", "Ficus obliqua", "Street", "2005"),
+    # High-pollen by family, not by genus: display_category is "Other", so only
+    # the raw family column can see this one.
+    _tree(
+        8,
+        "-37.800_144.960",
+        "Carlton",
+        "Other",
+        "Cupressus macrocarpa",
+        "Street",
+        "1990",
+        family="Cupressaceae",
+    ),
 ]
 
 
 @pytest.fixture
-def client(tmp_path: Path) -> Iterator[TestClient]:
+def client(tmp_path: Path, monkeypatch) -> Iterator[TestClient]:
+    # Every router but /api/access is gated behind require_access_token now;
+    # give tests a valid token by default so only the access tests themselves
+    # need to think about auth. access_token_secret must be >=32 bytes.
+    monkeypatch.setattr(settings, "access_password", "test-password")
+    monkeypatch.setattr(settings, "access_token_secret", "test-secret-32-bytes-minimum!!!!")
     db = tmp_path / "test.db"
     raw = sqlite3.connect(db)
     raw.executescript(SCHEMA.read_text())
-    raw.executemany("INSERT INTO zones VALUES (?, ?, ?, ?, ?)", ZONES)
+    raw.executemany("INSERT INTO zones VALUES (?, ?, ?, ?, ?, ?)", ZONES)
     raw.executemany("INSERT INTO trees VALUES (" + ", ".join(["?"] * 15) + ")", TREES)
     raw.commit()
     raw.close()
@@ -91,5 +116,7 @@ def client(tmp_path: Path) -> Iterator[TestClient]:
             yield session
 
     app.dependency_overrides[get_session] = override
-    yield TestClient(app)
+    test_client = TestClient(app)
+    test_client.headers["Authorization"] = f"Bearer {create_access_token()}"
+    yield test_client
     app.dependency_overrides.clear()

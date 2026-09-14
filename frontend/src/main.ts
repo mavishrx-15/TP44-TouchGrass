@@ -6,3 +6,8 @@ import './styles/tokens.css'
 import './styles/global.css'
 
 createApp(App).use(createPinia()).use(router).mount('#app')
+
+window.addEventListener('touchgrass:access-expired', () => {
+  if (router.currentRoute.value.name !== 'access')
+    void router.replace({ name: 'access', query: { redirect: router.currentRoute.value.fullPath } })
+})

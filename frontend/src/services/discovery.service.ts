@@ -15,7 +15,9 @@ export interface GenusSummary {
   treeCount: number
 }
 
-type ApiZone = Omit<TreeZone, 'label' | 'description' | 'mapPosition'>
+type ApiZone = Omit<TreeZone, 'label' | 'description' | 'mapPosition' | 'nearestStreet'> & {
+  nearestStreet?: string | null
+}
 type ApiTree = Omit<TreeRecord, 'distanceKm' | 'mapPosition'>
 
 export function findPrecinct(precincts: Precinct[], query: string): Precinct | undefined {
@@ -31,12 +33,18 @@ export function getSpecies(signal?: AbortSignal): Promise<GenusSummary[]> {
   return apiGet<GenusSummary[]>('/api/species', signal)
 }
 
-export function getWalkingRoutes(
+export async function getWalkingRoutes(
   origin: Coordinates,
   destination: Coordinates,
   signal?: AbortSignal,
 ): Promise<RouteOption[]> {
-  return apiPost<RouteOption[]>('/api/routes', { origin, destination }, signal)
+  // /api/routes now returns one scored route object, not a Fastest/Tree-Dense pair.
+  const route = await apiPost<RouteOption>(
+    '/api/routes',
+    { origin, destination, travelMode: 'WALK' },
+    signal,
+  )
+  return [{ ...route, id: 'personalised', label: 'Walking route' }]
 }
 
 export function getPlaceSuggestions(
@@ -63,9 +71,14 @@ export async function getPrecinctZones(
     signal,
   )
   // Add display-only fields here so API responses stay focused on domain data.
-  return result.map((zone, index) => ({
+  const precinctName = precinctId
+    .split('-')
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ')
+  return result.map((zone) => ({
     ...zone,
-    label: `Zone ${String(index + 1).padStart(2, '0')}`,
+    nearestStreet: zone.nearestStreet ?? null,
+    label: zone.nearestStreet ? `${precinctName} · ${zone.nearestStreet}` : precinctName,
     description: `${zone.density}-density tree cluster${zone.dominantGenus ? ` dominated by ${zone.dominantGenus}` : ''}.`,
     mapPosition: { x: 0, y: 0, width: 0, height: 0 },
   }))
@@ -86,7 +99,10 @@ export async function getPrecinctTrees(
   }))
 }
 
-function distanceKm(from: Precinct['referencePoint'], to: TreeRecord['coordinates']): number {
+export function distanceKm(
+  from: Precinct['referencePoint'],
+  to: TreeRecord['coordinates'],
+): number {
   // Haversine formula: great-circle distance between two coordinates in kilometres.
   const radians = (degrees: number) => (degrees * Math.PI) / 180
   const latitude = radians(to.lat - from.lat)
@@ -94,5 +110,5 @@ function distanceKm(from: Precinct['referencePoint'], to: TreeRecord['coordinate
   const value =
     Math.sin(latitude / 2) ** 2 +
     Math.cos(radians(from.lat)) * Math.cos(radians(to.lat)) * Math.sin(longitude / 2) ** 2
-  return 2 * 6371 * Math.asin(Math.sqrt(value))
+  return 2 * 6371 * Math.asin(Math.sqrt(Math.min(1, Math.max(0, value))))
 }

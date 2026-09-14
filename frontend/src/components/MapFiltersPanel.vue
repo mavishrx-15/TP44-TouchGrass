@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed } from 'vue'
-import { RefreshLeft } from '@element-plus/icons-vue'
+import { computed, onMounted, ref } from 'vue'
+import { Filter, RefreshLeft } from '@element-plus/icons-vue'
 import type { DensityTier, TreeGenus } from '@/types/discovery'
 
 const densities = defineModel<DensityTier[]>('densities', { required: true })
@@ -16,44 +16,63 @@ const allDensitiesOn = computed(() => densities.value.length === densityOptions.
 function toggleAllDensities() {
   densities.value = allDensitiesOn.value ? [] : [...densityOptions]
 }
+
+// A full panel floating open by default works on desktop, but on a phone it
+// covers the address fields and anything else sharing that corner of the
+// map. Start collapsed to a small toggle there instead; desktop keeps the
+// panel open like before.
+const expanded = ref(true)
+onMounted(() => {
+  if (window.matchMedia('(max-width: 760px)').matches) expanded.value = false
+})
 </script>
 
 <template>
-  <aside class="filter-panel" aria-label="Map filters">
-    <div class="panel-heading">
-      <span>Map filters</span>
-      <button
-        type="button"
-        class="density-toggle"
-        :class="{ 'is-off': !allDensitiesOn }"
-        :aria-pressed="allDensitiesOn"
-        @click="toggleAllDensities"
-      >
-        Tree Density
-      </button>
-    </div>
+  <aside class="filter-panel" :class="{ collapsed: !expanded }" aria-label="Map filters">
+    <button
+      type="button"
+      class="panel-toggle"
+      :aria-expanded="expanded"
+      aria-controls="map-filters-body"
+      @click="expanded = !expanded"
+    >
+      <ElIcon><Filter /></ElIcon>Map filters
+    </button>
+    <div v-show="expanded" id="map-filters-body">
+      <div class="panel-heading">
+        <button
+          type="button"
+          class="density-toggle"
+          :class="{ 'is-off': !allDensitiesOn }"
+          :aria-pressed="allDensitiesOn"
+          @click="toggleAllDensities"
+        >
+          Tree Density
+        </button>
+      </div>
 
-    <div class="filter-group">
-      <h2>Density</h2>
-      <ElCheckboxGroup v-model="densities">
-        <ElCheckbox v-for="tier in densityOptions" :key="tier" :value="tier">
-          {{ tier }}
-        </ElCheckbox>
-      </ElCheckboxGroup>
-    </div>
+      <div class="filter-group">
+        <h2>Density</h2>
+        <ElCheckboxGroup v-model="densities">
+          <ElCheckbox v-for="tier in densityOptions" :key="tier" :value="tier">
+            {{ tier }}
+          </ElCheckbox>
+        </ElCheckboxGroup>
+      </div>
 
-    <div class="filter-group species-group">
-      <h2>Species / genus</h2>
-      <ElCheckboxGroup v-model="genera">
-        <ElCheckbox v-for="genus in genusOptions" :key="genus" :value="genus">
-          <span class="legend-dot" :class="`genus-${genus.toLowerCase()}`" />{{ genus }}
-        </ElCheckbox>
-      </ElCheckboxGroup>
-    </div>
+      <div class="filter-group species-group">
+        <h2>Species / genus</h2>
+        <ElCheckboxGroup v-model="genera">
+          <ElCheckbox v-for="genus in genusOptions" :key="genus" :value="genus">
+            <span class="legend-dot" :class="`genus-${genus.toLowerCase()}`" />{{ genus }}
+          </ElCheckbox>
+        </ElCheckboxGroup>
+      </div>
 
-    <ElButton class="reset-button" plain :icon="RefreshLeft" @click="$emit('reset')">
-      Reset filters
-    </ElButton>
+      <ElButton class="reset-button" plain :icon="RefreshLeft" @click="$emit('reset')">
+        Reset filters
+      </ElButton>
+    </div>
   </aside>
 </template>
 
@@ -73,12 +92,46 @@ function toggleAllDensities() {
   box-shadow: 0 8px 28px rgb(31 68 35 / 14%);
 }
 
+.filter-panel.collapsed {
+  width: auto;
+  max-height: none;
+  padding: 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
+}
+
+.panel-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid rgb(23 53 29 / 10%);
+  border-radius: 20px;
+  background: rgb(255 255 255 / 96%);
+  color: var(--tg-green-800);
+  font-family: inherit;
+  font-size: 0.76rem;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 8px 28px rgb(31 68 35 / 14%);
+}
+
+.filter-panel:not(.collapsed) .panel-toggle {
+  margin-bottom: 10px;
+}
+
+#map-filters-body {
+  overflow-y: auto;
+  max-height: calc(100vh - 240px);
+}
+
 .panel-heading {
   display: grid;
   gap: 8px;
 }
 
-.panel-heading span,
 .filter-group h2 {
   margin: 0;
   color: var(--tg-muted);
@@ -179,17 +232,20 @@ function toggleAllDensities() {
   margin-top: 14px;
 }
 
-@media (max-width: 720px) {
-  .filter-panel {
+@media (max-width: 760px) {
+  /* The address search card floats centred, starting a little way down the
+     map - the collapsed toggle sits in the corner above it, not behind it. */
+  .filter-panel.collapsed {
+    top: 12px;
+    left: 12px;
+  }
+
+  .filter-panel:not(.collapsed) {
     top: 76px;
     left: 12px;
     width: 178px;
     max-height: calc(100% - 92px);
     padding: 12px;
-  }
-
-  .species-group {
-    display: none;
   }
 }
 </style>

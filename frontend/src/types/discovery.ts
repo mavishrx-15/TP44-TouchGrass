@@ -36,6 +36,7 @@ export interface TreeZone {
   id: string
   precinctId: string
   label: string
+  nearestStreet: string | null
   center: Coordinates
   bounds: MapBounds
   treeCount: number
@@ -69,7 +70,7 @@ export interface NeighbourhoodSnapshot {
 }
 
 export interface RouteOption {
-  id: 'fastest' | 'green'
+  id: 'personalised'
   label: string
   durationMinutes: number
   distanceKm: number

@@ -2,12 +2,14 @@
 import { Menu, Search } from '@element-plus/icons-vue'
 import { ref } from 'vue'
 import { useRoute } from 'vue-router'
+import BlindModeToggle from './BlindModeToggle.vue'
 
 const mobileMenuOpen = ref(false)
 const route = useRoute()
 
 const navigation = [
   { label: 'Home', to: '/' },
+  { label: 'Explore', to: '/recommendations' },
   { label: 'Map', to: '/map' },
   { label: 'Tree Explorer', to: '/tree-explorer' },
   { label: 'Tree Health', to: '/tree-health' },
@@ -19,6 +21,7 @@ function goHome() {
 </script>
 
 <template>
+  <a class="skip-link" href="#main-content">Skip to main content</a>
   <header class="app-header">
     <div class="page-container header-inner">
       <RouterLink class="brand" to="/" aria-label="TouchGrass home" @click="goHome">
@@ -37,6 +40,7 @@ function goHome() {
         </RouterLink>
       </nav>
 
+      <BlindModeToggle />
       <RouterLink class="identify-link" to="/identify-tree">
         <ElButton class="identify-button" plain :icon="Search">Identify a Tree</ElButton>
       </RouterLink>

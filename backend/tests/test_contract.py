@@ -153,6 +153,78 @@ def test_dominant_genus_is_null_when_a_zone_is_all_other(client):
     assert zone["dominantGenus"] is None
 
 
+def test_the_genus_breakdown_is_ranked_and_drops_other(client):
+    """US4.2: the card lists an area's trees by genus, commonest first.
+
+    "Other" is left out for the same reason it is left out of dominantGenus —
+    it covers 38% of the dataset and naming it tells the reader nothing.
+    """
+    zone = _zones(client, "kensington")[0]
+    assert zone["genera"] == [
+        {"name": "Eucalyptus", "count": 2},
+        {"name": "Acacia", "count": 1},
+    ]
+
+
+def test_a_zone_of_nothing_but_other_has_an_empty_breakdown(client):
+    """Empty, not a list containing "Other" — same rule as dominantGenus."""
+    zone = _zones(client, "carlton")[0]
+    assert zone["genera"] == []
+    assert zone["dominantGenus"] is None
+
+
+def test_park_share_is_the_proportion_standing_in_a_park(client):
+    """The only shade and noise signal the data carries.
+
+    Two of this zone's three trees are in a park.
+    """
+    assert _zones(client, "kensington")[0]["metrics"]["parkShare"] == 67
+
+
+def test_wind_pollinated_genera_count_as_high_pollen(client):
+    """Eucalyptus and Acacia are deliberately not on the list.
+
+    Both are insect-pollinated, and Eucalyptus is the main canopy genus —
+    flagging it would set the canopy score against the allergy score.
+    """
+    metrics = _zones(client, "kensington")[0]["metrics"]
+    assert metrics["highPollenTrees"] == 0
+    assert metrics["lowAllergyShare"] == 100
+
+
+def test_a_family_counts_even_when_its_genus_does_not(client):
+    """Cupressaceae and Oleaceae have no display_category of their own.
+
+    The display column files both under "Other", so the rule reads trees.family
+    instead — 872 cypresses and 803 ashes would otherwise be invisible. This
+    zone's cypress is "Other" by genus and high-pollen by family.
+    """
+    metrics = _zones(client, "carlton")[0]["metrics"]
+    assert metrics["highPollenTrees"] == 1
+    assert metrics["lowAllergyShare"] == 67
+
+
+def test_a_missing_street_is_reported_as_a_data_note(client):
+    """The design decision is explicit: flag a gap on the card, never hide it
+    and never fill it with something invented."""
+    named = _zones(client, "kensington")[0]
+    unnamed = _zones(client, "carlton")[0]
+    assert "No nearby street resolved; named by precinct." not in named["dataNotes"]
+    assert "No nearby street resolved; named by precinct." in unnamed["dataNotes"]
+
+
+def test_nearest_street_is_null_when_no_road_was_geocoded(client):
+    """US4.2: zones are named by their street instead of a "Zone 01" counter.
+
+    enrich_zones.py leaves street_name empty for a zone centred in a park, so
+    null is a real answer and not an error. The frontend falls back to the
+    precinct name — that substitution belongs there, not here, so this endpoint
+    reports the absence rather than inventing a label.
+    """
+    assert _zones(client, "kensington")[0]["nearestStreet"] == "Macaulay Road"
+    assert _zones(client, "carlton")[0]["nearestStreet"] is None
+
+
 # --- shapes and errors ------------------------------------------------------
 
 
@@ -178,7 +250,12 @@ def test_response_fields_are_camel_case(client):
         "treeCount",
         "density",
         "dominantGenus",
+        "nearestStreet",
         "distanceKm",
+        "precinctName",
+        "metrics",
+        "genera",
+        "dataNotes",
     }
     assert set(_trees(client, zoneId="-37.795_144.915")[0]) == {
         "id",
