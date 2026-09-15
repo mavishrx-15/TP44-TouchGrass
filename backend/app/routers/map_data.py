@@ -110,7 +110,7 @@ from math import asin, cos, radians, sin, sqrt
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import bindparam, text
 
 from app.db import SessionDep
@@ -208,6 +208,8 @@ class Zone(BaseModel):
     bounds: Bounds
     treeCount: int
     density: Density
+    nearestStreet: str | None = None
+    treeProfile: list[dict] = Field(default_factory=list)
     dominantGenus: str | None  # null when the zone holds nothing but "Other"
     distanceKm: float
 
@@ -354,7 +356,7 @@ def list_zones(
     rows = session.execute(
         text(
             f"""
-            SELECT cluster_id, center_lat, center_lon, tree_count, precinct
+            SELECT cluster_id, center_lat, center_lon, tree_count, precinct, street_name
             FROM zones
             WHERE precinct = :p {clause}
             ORDER BY tree_count DESC
@@ -368,6 +370,26 @@ def list_zones(
 
     origin = _reference_point(session, name)
     top = _dominant_genus({r.cluster_id for r in rows}, session)
+    profiles: dict[str, list[dict]] = {}
+    grouped = session.execute(
+        text(
+            """
+        SELECT cluster_id, display_category, family, located_in, COUNT(*) AS count
+        FROM trees WHERE cluster_id IN :ids
+        GROUP BY cluster_id, display_category, family, located_in
+    """
+        ).bindparams(bindparam("ids", expanding=True)),
+        {"ids": [r.cluster_id for r in rows]},
+    ).all()
+    for row in grouped:
+        profiles.setdefault(row.cluster_id, []).append(
+            {
+                "genus": row.display_category,
+                "family": row.family,
+                "locatedIn": row.located_in,
+                "count": row.count,
+            }
+        )
     return [
         Zone(
             id=r.cluster_id,
@@ -377,6 +399,8 @@ def list_zones(
             treeCount=r.tree_count,
             density=_density(r.tree_count),
             dominantGenus=top.get(r.cluster_id),
+            nearestStreet=r.street_name,
+            treeProfile=profiles.get(r.cluster_id, []),
             distanceKm=_distance_km(origin.lat, origin.lng, r.center_lat, r.center_lon),
         )
         for r in rows

@@ -1,5 +1,50 @@
 const BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080'
 
+const ACCESS_TOKEN_KEY = 'touchgrass_access_token'
+let expiryTimer: ReturnType<typeof setTimeout> | undefined
+
+export function clearAccessToken(): void {
+  sessionStorage.removeItem(ACCESS_TOKEN_KEY)
+  clearTimeout(expiryTimer)
+}
+
+export function getAccessToken(): string | null {
+  const token = sessionStorage.getItem(ACCESS_TOKEN_KEY)
+  if (!token) return null
+  try {
+    const [payload, signature, extra] = token.split('.')
+    if (!payload || !signature || extra) throw new Error('Invalid token')
+    const normalized = payload.replace(/-/g, '+').replace(/_/g, '/')
+    const { exp } = JSON.parse(atob(normalized)) as { exp: number }
+    if (!Number.isFinite(exp) || exp * 1000 <= Date.now()) throw new Error('Expired token')
+    return token
+  } catch {
+    clearAccessToken()
+    return null
+  }
+}
+
+export function watchAccessExpiry(): void {
+  clearTimeout(expiryTimer)
+  const token = getAccessToken()
+  if (!token) return
+  const payload = token.split('.')[0]!.replace(/-/g, '+').replace(/_/g, '/')
+  const { exp } = JSON.parse(atob(payload)) as { exp: number }
+  expiryTimer = setTimeout(
+    () => {
+      clearAccessToken()
+      window.dispatchEvent(new Event('access-expired'))
+    },
+    Math.min(exp * 1000 - Date.now(), 2147483647),
+  )
+}
+
+export function setAccessToken(token: string): void {
+  sessionStorage.setItem(ACCESS_TOKEN_KEY, token)
+  if (!getAccessToken()) throw new Error('Invalid access token')
+  watchAccessExpiry()
+}
+
 type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE'
 
 interface RequestOptions {
@@ -26,6 +71,8 @@ export class ApiError extends Error {
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const method = options.method ?? 'GET'
   const headers: HeadersInit = { Accept: 'application/json' }
+  const token = getAccessToken()
+  if (token && path !== '/api/access/verify') headers.Authorization = `Bearer ${token}`
 
   if (options.body !== undefined) {
     headers['Content-Type'] = 'application/json'
@@ -39,6 +86,10 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
   })
 
   if (!response.ok) {
+    if (response.status === 401 && path !== '/api/access/verify') {
+      clearAccessToken()
+      window.dispatchEvent(new Event('access-expired'))
+    }
     const contentType = response.headers.get('content-type')
     const detail = contentType?.includes('application/json')
       ? await response.json().catch(() => undefined)

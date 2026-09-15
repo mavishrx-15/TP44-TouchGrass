@@ -178,6 +178,8 @@ def test_response_fields_are_camel_case(client):
         "treeCount",
         "density",
         "dominantGenus",
+        "nearestStreet",
+        "treeProfile",
         "distanceKm",
     }
     assert set(_trees(client, zoneId="-37.795_144.915")[0]) == {

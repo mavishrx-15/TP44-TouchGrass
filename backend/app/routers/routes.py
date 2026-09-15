@@ -1,14 +1,16 @@
 """Walking routes backed by Google Routes and scored against local tree zones."""
 
-from math import asin, cos, radians, sin, sqrt
+from math import asin, ceil, cos, radians, sin, sqrt
+from typing import Literal
 
 import httpx
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import text
 
 from app.config import settings
 from app.db import SessionDep
+from app.route_scoring import Preferences, allergy_score, park_score, weighted_score
 
 router = APIRouter()
 EARTH_RADIUS_M = 6_371_000
@@ -16,18 +18,27 @@ TREE_CORRIDOR_M = 100
 
 
 class Coordinates(BaseModel):
-    lat: float
-    lng: float
+    lat: float = Field(ge=-90, le=90)
+    lng: float = Field(ge=-180, le=180)
 
 
 class RouteRequest(BaseModel):
     origin: Coordinates
     destination: Coordinates
+    preferences: Preferences = Field(default_factory=Preferences)
+    travelMode: Literal["WALK", "TRANSIT"] = "WALK"
 
 
 class RouteResult(BaseModel):
-    id: str
+    id: Literal["recommended"] = "recommended"
     label: str
+    bestMatch: bool
+    message: str
+    explanation: list[str]
+    matchScore: float
+    scores: dict[str, float]
+    travelMode: Literal["WALK", "TRANSIT"]
+    withinTimeBudget: bool
     durationMinutes: int
     distanceKm: float
     treeCount: int
@@ -92,14 +103,16 @@ def place_details(place_id: str) -> PlaceDetails:
 
 @router.post("/routes", response_model=list[RouteResult])
 def walking_routes(request: RouteRequest, session: SessionDep) -> list[RouteResult]:
-    """Return Google's fastest walk and the alternative passing most zone trees."""
+    """Select one preference-weighted route from available Google alternatives."""
+    if request.origin == request.destination:
+        raise HTTPException(status_code=422, detail="Origin and destination must be different.")
     if not settings.google_maps_api_key:
         raise HTTPException(status_code=503, detail="Google Routes API key is not configured.")
 
     payload = {
         "origin": {"location": {"latLng": _lat_lng(request.origin)}},
         "destination": {"location": {"latLng": _lat_lng(request.destination)}},
-        "travelMode": "WALK",
+        "travelMode": request.travelMode,
         "computeAlternativeRoutes": True,
         "languageCode": "en-AU",
         "units": "METRIC",
@@ -130,22 +143,35 @@ def walking_routes(request: RouteRequest, session: SessionDep) -> list[RouteResu
 
     candidates = response.json().get("routes", [])
     if not candidates:
-        raise HTTPException(status_code=404, detail="No walking route was found.")
+        raise HTTPException(status_code=404, detail="No route was found for this transport mode.")
 
-    scored = [
-        (_tree_score(_decode_polyline(item["polyline"]["encodedPolyline"]), session), item)
-        for item in candidates
-    ]
-    fastest = min(scored, key=lambda candidate: _duration_seconds(candidate[1]["duration"]))
-    alternatives = [candidate for candidate in scored if candidate[1] is not fastest[1]]
-    green = max(
-        alternatives or [fastest],
-        key=lambda candidate: (candidate[0], -_duration_seconds(candidate[1]["duration"])),
-    )
-    results = [_result("fastest", "Fastest Route", fastest)]
-    if green[1] is not fastest[1]:
-        results.append(_result("green", "Tree-Dense Route", green))
-    return results
+    scored = []
+    for item in candidates:
+        path = _decode_polyline(item["polyline"]["encodedPolyline"])
+        rows = _corridor_trees(path, session)
+        scored.append(
+            (
+                item,
+                _tree_score(path, session),
+                park_score(rows),
+                allergy_score(rows, request.preferences),
+                len(rows),
+            )
+        )
+    max_trees = max((item[1] for item in scored), default=0) or 1
+    ranked = []
+    for item, trees, parks, allergy, samples in scored:
+        scores = {"canopy": trees / max_trees, "shade": parks, "noise": parks, "allergy": allergy}
+        match = weighted_score(scores, request.preferences)
+        within = (
+            request.travelMode == "TRANSIT"
+            or _duration_seconds(item["duration"]) <= request.preferences.walkingMinutes * 60
+        )
+        ranked.append(
+            (within, match, -_duration_seconds(item["duration"]), item, trees, scores, samples)
+        )
+    selected = max(ranked, key=lambda item: item[:3])
+    return [_result(selected, request)]
 
 
 def _google_request(method: str, url: str, field_mask: str, json: dict | None = None) -> dict:
@@ -179,16 +205,102 @@ def _lat_lng(value: Coordinates) -> dict[str, float]:
     return {"latitude": value.lat, "longitude": value.lng}
 
 
-def _result(route_id: str, label: str, scored: tuple[int, dict]) -> RouteResult:
-    tree_count, route = scored
+def _result(selected: tuple, request: RouteRequest) -> RouteResult:
+    within, match, _, route, tree_count, scores, samples = selected
+    weighted = any(getattr(request.preferences, name) for name in scores)
+    best = within and (not weighted or match >= 0.7)
+    message = (
+        "Best available match for your preferences."
+        if best
+        else "Closest available match; some preferences could not be met."
+    )
+    if not within:
+        message = (
+            "No available route fits your walking time. "
+            "This is the closest preference match outside your time budget."
+        )
+    explanation = []
+    if request.preferences.canopy:
+        explanation.append(
+            f"Passes zones containing approximately {tree_count} trees; "
+            "canopy uses tree count as a proxy."
+        )
+    if samples and (request.preferences.shade or request.preferences.noise):
+        explanation.append(
+            f"{scores['shade']:.0%} of sampled corridor trees are in parks; "
+            "used as a shade and quieter-surroundings proxy, not live measurements."
+        )
+    if samples and request.preferences.allergy:
+        explanation.append(
+            f"{scores['allergy']:.0%} of sampled trees are outside your selected "
+            "avoidance genera/families. This does not measure pollen."
+        )
+    if not samples:
+        explanation.append(
+            "No individual tree data was found in this corridor; "
+            "shade, noise and allergy matches are unknown."
+        )
+    if request.travelMode == "WALK":
+        explanation.append(
+            f"Walking time {'fits' if within else 'exceeds'} your "
+            f"{request.preferences.walkingMinutes}-minute budget."
+        )
+    else:
+        explanation.append(
+            "Public transport selected; duration covers the whole journey. "
+            "The walking-only time budget is not applied."
+        )
+    if not weighted:
+        explanation.append(
+            "No environmental priorities selected; the shortest duration breaks the tie."
+        )
     return RouteResult(
-        id=route_id,
-        label=label,
-        durationMinutes=round(_duration_seconds(route["duration"]) / 60),
-        distanceKm=round(route["distanceMeters"] / 1000, 1),
+        label="Your personalised route",
+        durationMinutes=max(1, ceil(_duration_seconds(route["duration"]) / 60)),
+        distanceKm=round(route["distanceMeters"] / 1000, 2),
         treeCount=tree_count,
         encodedPolyline=route["polyline"]["encodedPolyline"],
+        bestMatch=best,
+        message=message,
+        explanation=explanation,
+        matchScore=round(match, 4),
+        scores=scores,
+        travelMode=request.travelMode,
+        withinTimeBudget=within,
     )
+
+
+def _corridor_trees(path: list[tuple[float, float]], session: SessionDep):
+    if not path:
+        return []
+    rows = session.execute(
+        text(
+            """
+        SELECT latitude, longitude, located_in, display_category, family FROM trees
+        WHERE latitude BETWEEN :south AND :north AND longitude BETWEEN :west AND :east
+    """
+        ),
+        {
+            "south": min(p[0] for p in path) - 0.002,
+            "north": max(p[0] for p in path) + 0.002,
+            "west": min(p[1] for p in path) - 0.002,
+            "east": max(p[1] for p in path) + 0.002,
+        },
+    ).all()
+    return [r for r in rows if _path_distance_m(r.latitude, r.longitude, path) <= TREE_CORRIDOR_M]
+
+
+def _path_distance_m(lat: float, lng: float, path: list[tuple[float, float]]) -> float:
+    # Project nearby segments into metres so long polyline segments do not omit trees.
+    scale_x = EARTH_RADIUS_M * cos(radians(lat))
+    points = [(radians(y - lng) * scale_x, radians(x - lat) * EARTH_RADIUS_M) for x, y in path]
+    closest = min(sqrt(x * x + y * y) for x, y in points)
+    for (ax, ay), (bx, by) in zip(points, points[1:], strict=False):
+        dx, dy = bx - ax, by - ay
+        length = dx * dx + dy * dy
+        t = max(0, min(1, -(ax * dx + ay * dy) / length)) if length else 0
+        closest = min(closest, sqrt((ax + t * dx) ** 2 + (ay + t * dy) ** 2))
+    return closest
 
 
 def _duration_seconds(value: str) -> int:

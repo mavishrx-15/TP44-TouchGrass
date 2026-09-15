@@ -1,4 +1,5 @@
 import { computed, ref } from 'vue'
+import { useJourneyStore } from '@/stores/journey'
 import { defineStore } from 'pinia'
 import {
   findPrecinct,
@@ -41,7 +42,6 @@ export const useDiscoveryStore = defineStore('discovery', () => {
   const selectedTree = ref<TreeRecord | null>(null)
   const selectedZone = ref<TreeZone | null>(null)
   const routeOptions = ref<RouteOption[]>([])
-  const selectedRouteId = ref<RouteOption['id']>('fastest')
   const routesLoading = ref(false)
   const routeError = ref<string | null>(null)
   const densityFilters = ref<DensityTier[]>(['High', 'Medium', 'Low'])
@@ -53,11 +53,8 @@ export const useDiscoveryStore = defineStore('discovery', () => {
     speciesCount: selectedPrecinct.value.speciesCount,
   }))
   const rankedZones = computed(() => zones.value)
-  const selectedRoute = computed(
-    () =>
-      routeOptions.value.find((route) => route.id === selectedRouteId.value) ??
-      routeOptions.value[0],
-  )
+  const selectedRoute = computed(() => routeOptions.value[0])
+  let routeRequestId = 0
 
   async function initialize() {
     // Avoid duplicate startup requests when multiple views mount together.
@@ -115,19 +112,36 @@ export const useDiscoveryStore = defineStore('discovery', () => {
   }
 
   async function planRoutes(origin: Coordinates, destination: Coordinates): Promise<boolean> {
+    const requestId = ++routeRequestId
     routesLoading.value = true
+    routeOptions.value = []
     routeError.value = null
     try {
-      routeOptions.value = await getWalkingRoutes(origin, destination)
-      selectedRouteId.value = 'fastest'
+      const journey = useJourneyStore()
+      const result = await getWalkingRoutes(
+        origin,
+        destination,
+        journey.preferences,
+        journey.travelMode,
+      )
+      if (requestId !== routeRequestId) return false
+      routeOptions.value = result
       return true
     } catch (error) {
+      if (requestId !== routeRequestId) return false
       routeOptions.value = []
       routeError.value = apiErrorMessage(error).replace('Tree data', 'Routes')
       return false
     } finally {
-      routesLoading.value = false
+      if (requestId === routeRequestId) routesLoading.value = false
     }
+  }
+
+  function clearRoutes() {
+    ++routeRequestId
+    routeOptions.value = []
+    routesLoading.value = false
+    routeError.value = null
   }
 
   function resetFilters() {
@@ -155,7 +169,6 @@ export const useDiscoveryStore = defineStore('discovery', () => {
     initialized,
     selectedTree,
     selectedZone,
-    selectedRouteId,
     selectedRoute,
     densityFilters,
     genusFilters,
@@ -165,5 +178,6 @@ export const useDiscoveryStore = defineStore('discovery', () => {
     search,
     planRoutes,
     resetFilters,
+    clearRoutes,
   }
 })

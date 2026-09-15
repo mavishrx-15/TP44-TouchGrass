@@ -20,8 +20,10 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from app.config import settings
 from app.db import get_session
 from app.main import app
+from app.security import create_access_token
 
 SCHEMA = Path(__file__).resolve().parent.parent / "database" / "schema.sql"
 
@@ -74,11 +76,15 @@ TREES = [
 
 
 @pytest.fixture
-def client(tmp_path: Path) -> Iterator[TestClient]:
+def client(tmp_path: Path, monkeypatch) -> Iterator[TestClient]:
     db = tmp_path / "test.db"
     raw = sqlite3.connect(db)
     raw.executescript(SCHEMA.read_text())
-    raw.executemany("INSERT INTO zones VALUES (?, ?, ?, ?, ?)", ZONES)
+    raw.executemany(
+        "INSERT INTO zones (cluster_id, center_lat, center_lon, tree_count, precinct, street_name) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        [(*z, "Test Street" if i == 0 else None) for i, z in enumerate(ZONES)],
+    )
     raw.executemany("INSERT INTO trees VALUES (" + ", ".join(["?"] * 15) + ")", TREES)
     raw.commit()
     raw.close()
@@ -91,5 +97,9 @@ def client(tmp_path: Path) -> Iterator[TestClient]:
             yield session
 
     app.dependency_overrides[get_session] = override
-    yield TestClient(app)
+    monkeypatch.setattr(settings, "access_password", "test-password")
+    monkeypatch.setattr(settings, "access_token_secret", "test-secret-32-characters-minimum-length")
+    with TestClient(app) as test_client:
+        test_client.headers["Authorization"] = f"Bearer {create_access_token()}"
+        yield test_client
     app.dependency_overrides.clear()

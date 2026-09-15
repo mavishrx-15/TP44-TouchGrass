@@ -8,6 +8,7 @@ const route = useRoute()
 
 const navigation = [
   { label: 'Home', to: '/' },
+  { label: 'Explore', to: '/recommendations' },
   { label: 'Map', to: '/map' },
   { label: 'Tree Explorer', to: '/tree-explorer' },
   { label: 'Tree Health', to: '/tree-health' },

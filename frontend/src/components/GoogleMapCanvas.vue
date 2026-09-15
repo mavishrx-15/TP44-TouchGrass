@@ -8,7 +8,6 @@ const props = defineProps<{
   trees: TreeRecord[]
   zones: TreeZone[]
   directionsOpen: boolean
-  selectedRouteId: RouteOption['id']
   routeOptions: RouteOption[]
 }>()
 
@@ -108,7 +107,7 @@ function renderRoutes() {
   clearRoutes()
   if (!props.directionsOpen) return
 
-  // Draw every candidate route, then highlight the selected one through styling.
+  // The API returns one personalised route.
   const routeBounds = new google.maps.LatLngBounds()
   routeLines = props.routeOptions
     .filter((route) => route.encodedPolyline)
@@ -119,10 +118,10 @@ function renderRoutes() {
         map: map.value!,
         path,
         clickable: false,
-        strokeColor: route.id === 'green' ? '#247438' : '#347dcc',
-        strokeOpacity: props.selectedRouteId === route.id ? 0.95 : 0.42,
-        strokeWeight: props.selectedRouteId === route.id ? 7 : 5,
-        zIndex: props.selectedRouteId === route.id ? 5 : 4,
+        strokeColor: '#247438',
+        strokeOpacity: 0.95,
+        strokeWeight: 7,
+        zIndex: 5,
       })
     })
   if (!routeBounds.isEmpty()) map.value.fitBounds(routeBounds, 90)
@@ -215,7 +214,7 @@ watch(
 )
 watch(() => props.trees, renderMarkers, { deep: true })
 watch(() => props.zones, renderZones, { deep: true })
-watch(() => [props.directionsOpen, props.selectedRouteId, props.routeOptions], renderRoutes, {
+watch(() => [props.directionsOpen, props.routeOptions], renderRoutes, {
   deep: true,
 })
 

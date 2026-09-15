@@ -1,6 +1,8 @@
 import { apiGet, apiPost } from '@/api/client'
 import type {
   Coordinates,
+  Preferences,
+  TravelMode,
   PlaceSuggestion,
   Precinct,
   RouteOption,
@@ -34,9 +36,15 @@ export function getSpecies(signal?: AbortSignal): Promise<GenusSummary[]> {
 export function getWalkingRoutes(
   origin: Coordinates,
   destination: Coordinates,
+  preferences: Preferences,
+  travelMode: TravelMode = 'WALK',
   signal?: AbortSignal,
 ): Promise<RouteOption[]> {
-  return apiPost<RouteOption[]>('/api/routes', { origin, destination }, signal)
+  return apiPost<RouteOption[]>(
+    '/api/routes',
+    { origin, destination, preferences, travelMode },
+    signal,
+  )
 }
 
 export function getPlaceSuggestions(
@@ -63,9 +71,11 @@ export async function getPrecinctZones(
     signal,
   )
   // Add display-only fields here so API responses stay focused on domain data.
-  return result.map((zone, index) => ({
+  return result.map((zone) => ({
     ...zone,
-    label: `Zone ${String(index + 1).padStart(2, '0')}`,
+    nearestStreet: zone.nearestStreet ?? null,
+    treeProfile: zone.treeProfile ?? [],
+    label: zoneLabel(zone.precinctId, zone.nearestStreet),
     description: `${zone.density}-density tree cluster${zone.dominantGenus ? ` dominated by ${zone.dominantGenus}` : ''}.`,
     mapPosition: { x: 0, y: 0, width: 0, height: 0 },
   }))
@@ -86,7 +96,10 @@ export async function getPrecinctTrees(
   }))
 }
 
-function distanceKm(from: Precinct['referencePoint'], to: TreeRecord['coordinates']): number {
+export function distanceKm(
+  from: Precinct['referencePoint'],
+  to: TreeRecord['coordinates'],
+): number {
   // Haversine formula: great-circle distance between two coordinates in kilometres.
   const radians = (degrees: number) => (degrees * Math.PI) / 180
   const latitude = radians(to.lat - from.lat)
@@ -94,5 +107,13 @@ function distanceKm(from: Precinct['referencePoint'], to: TreeRecord['coordinate
   const value =
     Math.sin(latitude / 2) ** 2 +
     Math.cos(radians(from.lat)) * Math.cos(radians(to.lat)) * Math.sin(longitude / 2) ** 2
-  return 2 * 6371 * Math.asin(Math.sqrt(value))
+  return 2 * 6371 * Math.asin(Math.sqrt(Math.min(1, Math.max(0, value))))
+}
+
+export function zoneLabel(precinctId: string, street: string | null): string {
+  const precinct = precinctId
+    .split('-')
+    .map((word) => word[0]?.toUpperCase() + word.slice(1))
+    .join(' ')
+  return street?.trim() ? `${precinct} · ${street.trim()}` : precinct
 }

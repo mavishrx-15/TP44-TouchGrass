@@ -40,6 +40,8 @@ export interface TreeZone {
   bounds: MapBounds
   treeCount: number
   density: DensityTier
+  nearestStreet: string | null
+  treeProfile: { genus: string; family: string; locatedIn: string; count: number }[]
   dominantGenus: TreeGenus | null
   distanceKm: number
   description: string
@@ -69,7 +71,14 @@ export interface NeighbourhoodSnapshot {
 }
 
 export interface RouteOption {
-  id: 'fastest' | 'green'
+  id: 'recommended'
+  bestMatch: boolean
+  message: string
+  explanation: string[]
+  matchScore: number
+  scores: Record<'canopy' | 'shade' | 'noise' | 'allergy', number>
+  travelMode: TravelMode
+  withinTimeBudget: boolean
   label: string
   durationMinutes: number
   distanceKm: number
@@ -87,3 +96,14 @@ export interface RoutePlace extends PlaceSuggestion {
 }
 
 export type RouteEndpoint = TreeZone | RoutePlace | null
+
+export type TravelMode = 'WALK' | 'TRANSIT'
+export interface Preferences {
+  canopy: number
+  shade: number
+  noise: number
+  allergy: number
+  walkingMinutes: number
+  avoidGenera: string[]
+  avoidFamilies: string[]
+}

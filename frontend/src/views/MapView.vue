@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { Close, Location, Refresh, Search } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
@@ -8,23 +8,18 @@ import AppHeader from '@/components/AppHeader.vue'
 import GoogleMapCanvas from '@/components/GoogleMapCanvas.vue'
 import MapFiltersPanel from '@/components/MapFiltersPanel.vue'
 import RoutePlanner from '@/components/RoutePlanner.vue'
+import { useJourneyStore } from '@/stores/journey'
 import { useDiscoveryStore } from '@/stores/discovery'
-import type {
-  Coordinates,
-  RouteEndpoint,
-  RouteOption,
-  TreeRecord,
-  TreeZone,
-} from '@/types/discovery'
+import type { Coordinates, RouteEndpoint, TreeRecord, TreeZone } from '@/types/discovery'
 
 const route = useRoute()
 const discovery = useDiscoveryStore()
+const journey = useJourneyStore()
 const {
   selectedPrecinct,
   rankedZones,
   selectedTree,
   selectedZone,
-  selectedRouteId,
   densityFilters,
   genusFilters,
   loadError,
@@ -37,7 +32,6 @@ const mapCanvas = ref<InstanceType<typeof GoogleMapCanvas> | null>(null)
 const searchQuery = ref(selectedPrecinct.value.name)
 const directionsOpen = ref(route.query.directions === 'true')
 const plannerCollapsed = ref(false)
-const routeDestination = ref<TreeZone | null>(null)
 const mapError = ref<string | null>(null)
 
 const visibleZones = computed(() =>
@@ -83,14 +77,15 @@ function selectZone(zone: TreeZone) {
 }
 
 async function openDirections(zone?: TreeZone) {
-  routeDestination.value = zone ?? null
   directionsOpen.value = true
   plannerCollapsed.value = false
   if (zone) {
+    journey.destination = { id: zone.id, label: zone.label, coordinates: zone.center }
+    await nextTick()
     selectedZone.value = zone
     selectedTree.value = null
     mapCanvas.value?.focusZone(zone)
-    await planRouteEndpoints(null, zone)
+    if (journey.startLocation) await planRouteEndpoints(null, zone)
   }
 }
 
@@ -98,9 +93,13 @@ async function planRouteEndpoints(
   originEndpoint: RouteEndpoint,
   destinationEndpoint: RouteEndpoint,
 ) {
-  const location = currentLocation()
-  const origin = endpointCoordinates(originEndpoint, location)
-  const destination = endpointCoordinates(destinationEndpoint, location)
+  const location = journey.startLocation
+  if (!location && (!originEndpoint || !destinationEndpoint)) {
+    ElMessage.warning('Select your starting location first.')
+    return
+  }
+  const origin = endpointCoordinates(originEndpoint, location!)
+  const destination = endpointCoordinates(destinationEndpoint, location!)
   if (origin.lat === destination.lat && origin.lng === destination.lng) {
     ElMessage.warning('Origin and destination must be different.')
     return
@@ -109,8 +108,8 @@ async function planRouteEndpoints(
     selectedZone.value = destinationEndpoint
     mapCanvas.value?.focusZone(destinationEndpoint)
   }
-  if (!(await discovery.planRoutes(origin, destination))) {
-    ElMessage.error(discovery.routeError ?? 'Routes could not be loaded')
+  if (!(await discovery.planRoutes(origin, destination)) && discovery.routeError) {
+    ElMessage.error(discovery.routeError)
   }
 }
 
@@ -119,15 +118,10 @@ function endpointCoordinates(endpoint: RouteEndpoint, location: Coordinates): Co
   return 'center' in endpoint ? endpoint.center : endpoint.coordinates
 }
 
-// "My location" is fixed to Melbourne central rather than the device's real
-// position, so route planning stays deterministic across devices/browsers.
-const MELBOURNE_CENTRAL: Coordinates = { lat: -37.8136, lng: 144.9631 }
-
-function currentLocation(): Coordinates {
-  return MELBOURNE_CENTRAL
-}
+onBeforeUnmount(() => discovery.clearRoutes())
 
 function closeDirections() {
+  discovery.clearRoutes()
   directionsOpen.value = false
   plannerCollapsed.value = false
 }
@@ -136,11 +130,18 @@ function closeDetails() {
   selectedTree.value = null
   selectedZone.value = null
 }
-//
-function selectRoute(id: RouteOption['id']) {
-  selectedRouteId.value = id
-  plannerCollapsed.value = true
-}
+watch(
+  [
+    () => journey.startLocation,
+    () => journey.destination,
+    () => journey.preferences,
+    () => journey.travelMode,
+  ],
+  () => {
+    discovery.clearRoutes()
+  },
+  { deep: true },
+)
 
 watch(
   [() => route.query.zone, rankedZones],
@@ -163,7 +164,6 @@ watch(
         :trees="visibleTrees"
         :zones="visibleZones"
         :directions-open="directionsOpen && discovery.routeOptions.length > 0"
-        :selected-route-id="selectedRouteId"
         :route-options="discovery.routeOptions"
         @select-tree="selectTree"
         @select-zone="selectZone"
@@ -204,13 +204,10 @@ watch(
       <RoutePlanner
         v-if="directionsOpen"
         :options="discovery.routeOptions"
-        :selected-id="selectedRouteId"
         :zones="rankedZones"
-        :initial-destination="routeDestination"
         :loading="discovery.routesLoading"
         :error="discovery.routeError"
         :collapsed="plannerCollapsed"
-        @select="selectRoute"
         @route="planRouteEndpoints"
         @toggle-collapse="plannerCollapsed = !plannerCollapsed"
         @close="closeDirections"

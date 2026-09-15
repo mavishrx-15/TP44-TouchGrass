@@ -36,8 +36,9 @@ def main() -> None:
     conn.executescript(SCHEMA.read_text())
 
     conn.executemany(
-        "INSERT INTO zones VALUES (:cluster_id, :center_lat, :center_lon, :tree_count, :precinct)",
-        data["zones"],
+        "INSERT INTO zones VALUES "
+        "(:cluster_id, :center_lat, :center_lon, :tree_count, :precinct, :street_name)",
+        [{**z, "street_name": z.get("street_name")} for z in data["zones"]],
     )
     conn.executemany(
         """
