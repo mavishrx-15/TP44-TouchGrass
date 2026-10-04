@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import text
 
+from app.cbd import CBD_BOUNDS
 from app.config import settings
 from app.db import SessionDep
 from app.routers.map_data import (
@@ -242,15 +243,18 @@ class PlaceDetails(BaseModel):
 
 @router.get("/places/autocomplete", response_model=list[PlaceSuggestion])
 def autocomplete_places(query: str = Query(min_length=2, max_length=120)) -> list[PlaceSuggestion]:
-    """Google Places suggestions biased to inner Melbourne."""
+    """Google Places suggestions restricted to the Melbourne CBD (Epic 5,
+    US5.5: "only places inside the CBD are suggested" everywhere a location
+    search appears). A hard locationRestriction, not a bias - Sprout only
+    knows the trees inside this box, so a result outside it is unusable."""
     payload = {
         "input": query,
         "includedRegionCodes": ["au"],
         "languageCode": "en-AU",
-        "locationBias": {
-            "circle": {
-                "center": {"latitude": -37.8136, "longitude": 144.9631},
-                "radius": 50_000,
+        "locationRestriction": {
+            "rectangle": {
+                "low": {"latitude": CBD_BOUNDS["south"], "longitude": CBD_BOUNDS["west"]},
+                "high": {"latitude": CBD_BOUNDS["north"], "longitude": CBD_BOUNDS["east"]},
             }
         },
     }

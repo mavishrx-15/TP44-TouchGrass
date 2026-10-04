@@ -4,7 +4,7 @@ from sqlalchemy import text
 
 from app.config import settings
 from app.db import SessionDep
-from app.routers import access, ai_chat, map_data, routes
+from app.routers import access, ai_chat, map_data, routes, weather
 from app.security import require_access_token
 
 app = FastAPI(title="TouchGrass API", version="0.1.0")
@@ -39,5 +39,6 @@ for feature, prefix in (
     (map_data.router, "/api"),
     (routes.router, "/api"),
     (ai_chat.router, "/api/ai"),
+    (weather.router, "/api/weather"),
 ):
     app.include_router(feature, prefix=prefix, dependencies=[Depends(require_access_token)])

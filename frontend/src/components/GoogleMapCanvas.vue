@@ -1,7 +1,14 @@
 <script setup lang="ts">
 import { importLibrary, setOptions } from '@googlemaps/js-api-loader'
 import { computed, onBeforeUnmount, onMounted, shallowRef, watch } from 'vue'
-import type { Coordinates, DensityTier, RouteOption, TreeRecord, TreeZone } from '@/types/discovery'
+import type {
+  Coordinates,
+  DensityTier,
+  MapBounds,
+  RouteOption,
+  TreeRecord,
+  TreeZone,
+} from '@/types/discovery'
 
 const props = defineProps<{
   center: Coordinates
@@ -19,6 +26,8 @@ const props = defineProps<{
   // destination pin. Defaults to the existing behaviour for callers that
   // rely on it (MapView's search bar, the recommendation card thumbnail).
   autoCenter?: boolean
+  // Epic 5, US5.5: "a dashed line marks the CBD edge" on Sprout's map step.
+  cbdBounds?: MapBounds
 }>()
 
 const emit = defineEmits<{
@@ -33,6 +42,7 @@ let markers: google.maps.marker.AdvancedMarkerElement[] = []
 let rectangles: google.maps.Rectangle[] = []
 let routeLines: google.maps.Polyline[] = []
 let endpointMarkers: google.maps.marker.AdvancedMarkerElement[] = []
+let cbdOutline: google.maps.Polyline | null = null
 let disposed = false
 
 const previewPoints = computed(() => {
@@ -136,6 +146,36 @@ function renderZones() {
     })
     rectangle.addListener('click', () => emit('selectZone', zone))
     return rectangle
+  })
+}
+
+function renderCbdOutline() {
+  cbdOutline?.setMap(null)
+  cbdOutline = null
+  if (!map.value || !props.cbdBounds) return
+  const { north, south, east, west } = props.cbdBounds
+  const path = [
+    { lat: north, lng: west },
+    { lat: north, lng: east },
+    { lat: south, lng: east },
+    { lat: south, lng: west },
+    { lat: north, lng: west },
+  ]
+  // Rectangle has no dashed stroke option - a dashed line is a Polyline
+  // whose visible stroke is a repeating short-dash icon instead.
+  cbdOutline = new google.maps.Polyline({
+    map: map.value,
+    path,
+    clickable: false,
+    strokeOpacity: 0,
+    zIndex: 2,
+    icons: [
+      {
+        icon: { path: 'M 0,-1 0,1', strokeOpacity: 1, strokeColor: '#1f5a2c', scale: 3 },
+        offset: '0',
+        repeat: '14px',
+      },
+    ],
   })
 }
 
@@ -283,6 +323,7 @@ onMounted(async () => {
 
     await renderMarkers()
     renderZones()
+    renderCbdOutline()
     renderRoutes()
     await renderEndpoints()
   } catch (error) {
@@ -300,6 +341,7 @@ watch(
 )
 watch(() => props.trees, renderMarkers, { deep: true })
 watch(() => props.zones, renderZones, { deep: true })
+watch(() => props.cbdBounds, renderCbdOutline, { deep: true })
 watch(() => [props.directionsOpen, props.routeOptions], renderRoutes, {
   deep: true,
 })
@@ -310,6 +352,7 @@ onBeforeUnmount(() => {
   clearMarkers()
   clearRectangles()
   clearRoutes()
+  cbdOutline?.setMap(null)
   endpointMarkers.forEach((marker) => {
     marker.map = null
   })

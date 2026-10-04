@@ -33,12 +33,13 @@ declare module 'vue' {
     LeafIcon: typeof import('./components/LeafIcon.vue')['default']
     LocationSearch: typeof import('./components/LocationSearch.vue')['default']
     MapFiltersPanel: typeof import('./components/MapFiltersPanel.vue')['default']
-    PreferenceInfo: typeof import('./components/PreferenceInfo.vue')['default']
     QuickActionCard: typeof import('./components/QuickActionCard.vue')['default']
     RecommendationCard: typeof import('./components/RecommendationCard.vue')['default']
     RoutePlanner: typeof import('./components/RoutePlanner.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
+    SproutGuide: typeof import('./components/sprout/SproutGuide.vue')['default']
+    SproutTree: typeof import('./components/sprout/SproutTree.vue')['default']
     StatCard: typeof import('./components/StatCard.vue')['default']
   }
   export interface GlobalDirectives {
