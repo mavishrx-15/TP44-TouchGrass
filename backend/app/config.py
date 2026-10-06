@@ -8,14 +8,18 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    # Provisional Hoddle Grid outline; replace with the team's agreed GeoJSON ring.
+    # The Hoddle Grid, from the centreline intersections of its four streets in
+    # OpenStreetMap, pushed out 20 m to take in the far kerb — and further on
+    # the two sides where the main stations sit just outside the grid line:
+    # 80 m past Flinders St for Flinders Street Station, 120 m past Spencer St
+    # for Southern Cross. See database/CBD_API.md.
     # Coordinates are [longitude, latitude], as in GeoJSON. No user positions are stored.
     cbd_boundary: list[tuple[float, float]] = [
-        (144.9514, -37.8141),
-        (144.9665, -37.8075),
-        (144.9740, -37.8154),
-        (144.9590, -37.8220),
-        (144.9514, -37.8141),
+        (144.954098, -37.822128),  # Flinders St x Spencer St
+        (144.975427, -37.815891),  # Flinders St x Spring St
+        (144.971426, -37.807191),  # Spring St x La Trobe St
+        (144.950070, -37.813376),  # La Trobe St x Spencer St
+        (144.954098, -37.822128),
     ]
 
     cors_origins: str = "http://localhost:5173"

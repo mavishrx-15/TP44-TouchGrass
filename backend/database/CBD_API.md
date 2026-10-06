@@ -4,14 +4,37 @@ Implemented on `feature/iteration3-cbd-data`, based on `origin/dev` at
 `0cd21d1`. No schema migration is needed. The existing zones.street_name
 column is required, as on dev; apply migration 001 to an older database.
 
-## Boundary confirmation still needed
+## The boundary
 
-The design PDF says Hoddle Grid and 186 zones but supplies no coordinates.
-`app/config.py` currently contains a **provisional**, rotated outline. It is
-not an official cadastral boundary or the team's confirmed prototype box.
-Against the checked-in dataset it includes 156 zones (0 High, 91 Medium,
-65 Low), not the PDF's 186. Confirm the outline with the frontend/data owner
-before deployment or acceptance testing. Do not hard-code the PDF's count.
+The Hoddle Grid is bounded by Flinders, Spring, La Trobe and Spencer streets.
+The four corners are those streets' centreline intersections in OpenStreetMap.
+Three are nodes the two streets share; La Trobe St stops about 40 m short of
+Spring St in the map data, so that corner is where the two street lines meet
+when extended — it lands within 6 m of where the other three corners place a
+parallelogram's fourth, which is what the grid is.
+
+The outline is then pushed out from each street:
+
+| Edge | Margin | Why |
+|---|---|---|
+| La Trobe St (north) | 20 m | The far kerb — trees on both sides of a boundary street |
+| Spring St (east) | 20 m | Same; kept tight so the parks east of Spring St stay out |
+| Flinders St (south) | 80 m | Flinders Street Station sits south of the street line |
+| Spencer St (west) | 120 m | Southern Cross sits west of the street line |
+
+The stations are why the margin is uneven. Flinders Street Station is one of
+US5.5's three quick-pick start points, so it has to be inside or "Grow my
+route" returns `outside_cbd`. Southern Cross is a start point in the design
+doc's own destination check. A uniform 120 m would take in both stations but
+would also push the east edge into the park fringe along Wellington and
+Victoria Parade, which the design doc's rule — destinations inside the grid —
+rules out.
+
+Against the checked-in dataset this selects **198 zones (1 High, 118 Medium,
+79 Low)**. The design doc's 186 (2 High, 113 Medium, 71 Low) was counted
+without published coordinates; no uniform margin reproduces both its total and
+its tiers, so the outline is fitted to the streets and the start points, not
+to the number. `tests/test_cbd_boundary.py` holds it to those start points.
 
 Set `CBD_BOUNDARY` to a JSON list of `[longitude, latitude]` vertices; the
 last vertex is automatically closed if necessary. Restart the backend after
