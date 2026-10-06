@@ -5,17 +5,15 @@ from typing import Literal
 
 import httpx
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from sqlalchemy import text
 
 from app.cbd import coverage_bounds, require_inside
 from app.config import settings
 from app.db import SessionDep
-from app.routers.map_data import (
-    HIGH_POLLEN_FAMILIES,
-    HIGH_POLLEN_GENERA,
-    AreaMetrics,
-)
+from app.schemas.common import Coordinates
+from app.schemas.map_data import AreaMetrics
+from app.services.zone_data import HIGH_POLLEN_FAMILIES, HIGH_POLLEN_GENERA
 
 router = APIRouter()
 EARTH_RADIUS_M = 6_371_000
@@ -25,11 +23,6 @@ TravelMode = Literal["WALK", "TRANSIT"]
 
 # Iteration-2 handoff, "Prototype rules requiring team confirmation".
 WALKING_TIME_TOLERANCE_MINUTES = 2
-
-
-class Coordinates(BaseModel):
-    lat: float = Field(ge=-90, le=90, allow_inf_nan=False)
-    lng: float = Field(ge=-180, le=180, allow_inf_nan=False)
 
 
 class Preferences(BaseModel):
