@@ -31,10 +31,18 @@ Notes:
 
 import argparse
 import json
+import re
 import time
 import urllib.parse
 import urllib.request
 from pathlib import Path
+
+# Where two named trails share one path, Nominatim returns both names in one
+# string: "Main Yarra Trail Capital City Trail". The pattern is deliberately
+# narrow — only a second "Trail" after a first — because a general "cut after
+# the first road suffix" rule would split real names such as "Federation
+# Square Eastern Access Road" in half.
+_TWO_TRAILS = re.compile(r"^(.+?\bTrail)\s+\S.*\bTrail$")
 
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/reverse"
 USER_AGENT = "TouchGrass-TP44/1.0 (contact: ginulidd@gmail.com)"
@@ -51,6 +59,21 @@ def load_cache(cache_path: Path) -> dict:
 def save_cache(cache_path: Path, cache: dict) -> None:
     with open(cache_path, "w") as f:
         json.dump(cache, f)
+
+
+def first_street_name(name: str | None) -> str | None:
+    """One street name, when Nominatim gave two.
+
+    Keeps the first, as the design doc asks. That is not always the same trail
+    for the same stretch of path — OpenStreetMap lists the names in whichever
+    order they were tagged — but it is always a real name, never two run
+    together on a card.
+    """
+    if not name:
+        return name
+    name = name.split(" / ")[0].strip()
+    joined = _TWO_TRAILS.match(name)
+    return joined.group(1) if joined else name
 
 
 def reverse_geocode_street(lat: float, lon: float) -> str | None:
@@ -75,7 +98,9 @@ def reverse_geocode_street(lat: float, lon: float) -> str | None:
     address = data.get("address", {})
     # Nominatim uses "road" for streets; fall back to other locality fields
     # if a zone centre happens to fall somewhere without a road (e.g. a park).
-    return address.get("road") or address.get("pedestrian") or address.get("footway")
+    return first_street_name(
+        address.get("road") or address.get("pedestrian") or address.get("footway")
+    )
 
 
 def enrich_zones(zones: list[dict], cache: dict, cache_path: Path) -> None:
@@ -84,7 +109,7 @@ def enrich_zones(zones: list[dict], cache: dict, cache_path: Path) -> None:
         cluster_id = zone["cluster_id"]
 
         if cluster_id in cache:
-            zone["street_name"] = cache[cluster_id]
+            zone["street_name"] = first_street_name(cache[cluster_id])
             continue
 
         try:
