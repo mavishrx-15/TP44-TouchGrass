@@ -6,15 +6,21 @@ which is what US3.2 actually changed. All of it is pure functions over
 candidates shaped like Google's.
 """
 
+from app.db import get_session
+from app.main import app
 from app.routers.routes import (
     AreaMetrics,
+    Bounds,
     Corridor,
     Preferences,
     _best,
     _decode_polyline,
+    _dense_zone_share,
     _duration_seconds,
     _match,
     _result,
+    _samples_along,
+    _share_inside,
 )
 
 
@@ -195,3 +201,70 @@ def test_duration_is_read_from_googles_seconds_string():
 def test_an_empty_polyline_decodes_to_no_points():
     """A route with no geometry scores zero rather than raising."""
     assert _decode_polyline("") == []
+
+
+# --- denseZoneShare: how much of the walk runs through dense zones ----------
+
+
+def test_samples_are_spaced_by_distance_not_by_vertex():
+    """Two vertices or eleven, the same 100 m of route yields the same samples."""
+    two = [(-37.8100, 144.9600), (-37.8091, 144.9600)]
+    eleven = [(-37.8100 + i * 0.00009, 144.9600) for i in range(11)]
+    assert abs(len(_samples_along(two, 5)) - len(_samples_along(eleven, 5))) <= 1
+
+
+def test_dense_share_weights_distance_not_vertices():
+    """Google bunches vertices on a bend. Counting vertices would call this walk
+    almost entirely dense; walking it, most of the distance is outside the zone.
+    """
+    cell = Bounds(north=-37.8095, south=-37.8105, east=144.9605, west=144.9595)
+    bend = [(-37.8100 + i * 0.00001, 144.9600 + (i % 2) * 0.00001) for i in range(10)]
+    path = [*bend, (-37.8080, 144.9600)]  # then ~210 m straight north, out of the cell
+
+    vertices_inside = sum(
+        cell.south <= lat <= cell.north and cell.west <= lng <= cell.east for lat, lng in path
+    )
+    assert vertices_inside / len(path) > 0.9
+    assert _share_inside(_samples_along(path, 5), [cell]) < 0.35
+
+
+def test_dense_share_handles_empty_input():
+    cell = Bounds(north=-37.8095, south=-37.8105, east=144.9605, west=144.9595)
+    assert _samples_along([], 5) == []
+    assert _samples_along([(-37.81, 144.96)], 5) == [(-37.81, 144.96)]
+    assert _share_inside([], [cell]) == 0.0
+    assert _share_inside([(-37.81, 144.96)], []) == 0.0
+
+
+def _session():
+    return next(app.dependency_overrides[get_session]())
+
+
+def test_a_walk_inside_a_high_zone_is_all_dense(client):
+    """Fixture zone -37.795_144.915 holds 38 trees: High."""
+    path = [(-37.7952, 144.9148), (-37.7948, 144.9152)]
+    assert _dense_zone_share(path, path, _session()) == 1.0
+
+
+def test_low_zones_do_not_count_as_dense(client):
+    """Fixture zone -37.798_144.918 holds 9 trees: Low, below DENSITY_LOW."""
+    path = [(-37.7982, 144.9178), (-37.7978, 144.9182)]
+    assert _dense_zone_share(path, path, _session()) == 0.0
+
+
+def test_a_walk_leaving_a_dense_zone_is_partly_dense(client):
+    """Starts in the middle of the High cell and walks east past its edge into
+    an empty cell: about half the distance is inside."""
+    path = [(-37.7950, 144.9150), (-37.7950, 144.9160)]
+    assert 0.4 <= _dense_zone_share(path, path, _session()) <= 0.6
+
+
+def test_transit_carries_no_dense_share():
+    """Like metrics: a share of the route walked through trees is not a claim to
+    make about a tram ride."""
+    scored = (
+        Corridor(trees=40, park=0, high_pollen=0, canopy=0, dense_share=0.36),
+        _candidate(600),
+    )
+    assert _result("WALK", scored, 1).denseZoneShare == 0.36
+    assert _result("TRANSIT", scored, 1).denseZoneShare is None
