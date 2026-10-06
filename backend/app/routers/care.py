@@ -46,7 +46,11 @@ MAX_BODY_CHARS = 500
 # About 1.5 MB of image once base64 is decoded. Phone photos are resized on the
 # device before upload, so anything larger is a mistake or an abuse attempt.
 MAX_PHOTO_CHARS = 2_000_000
-ALLOWED_PHOTO_PREFIXES = ("data:image/jpeg;base64,", "data:image/png;base64,", "data:image/webp;base64,")
+ALLOWED_PHOTO_PREFIXES = (
+    "data:image/jpeg;base64,",
+    "data:image/png;base64,",
+    "data:image/webp;base64,",
+)
 
 
 class CamelModel(BaseModel):
@@ -115,8 +119,12 @@ def _now() -> str:
 def _check_photo(photo_data_url: str | None) -> None:
     if photo_data_url is None:
         return
-    if len(photo_data_url) > MAX_PHOTO_CHARS or not photo_data_url.startswith(ALLOWED_PHOTO_PREFIXES):
-        raise HTTPException(status_code=422, detail="Photo must be a JPEG, PNG or WebP image under 1.5 MB.")
+    if len(photo_data_url) > MAX_PHOTO_CHARS or not photo_data_url.startswith(
+        ALLOWED_PHOTO_PREFIXES
+    ):
+        raise HTTPException(
+            status_code=422, detail="Photo must be a JPEG, PNG or WebP image under 1.5 MB."
+        )
 
 
 def _require_admin(admin_token: str | None) -> None:
@@ -142,7 +150,8 @@ def _load_pin(session, pin_id: str):
     row = session.execute(
         text(
             """
-            SELECT id, zone_id, latitude, longitude, accuracy_m, photo_data, photo_status, created_at
+            SELECT id, zone_id, latitude, longitude, accuracy_m, photo_data, photo_status,
+                   created_at
             FROM tree_pins WHERE id = :id
             """
         ),
@@ -238,7 +247,8 @@ def create_message(pin_id: str, payload: MessageCreate, session: SessionDep) -> 
 def _message_row(session, message_id: str) -> CareMessage:
     row = session.execute(
         text(
-            "SELECT id, pin_id, zone_id, body, kind, status, created_at FROM tree_messages WHERE id = :id"
+            "SELECT id, pin_id, zone_id, body, kind, status, created_at "
+            "FROM tree_messages WHERE id = :id"
         ),
         {"id": message_id},
     ).first()
