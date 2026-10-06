@@ -5,9 +5,10 @@ from typing import Literal
 
 import httpx
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import text
 
+from app.cbd import coverage_bounds, require_inside
 from app.config import settings
 from app.db import SessionDep
 from app.routers.map_data import (
@@ -27,8 +28,8 @@ WALKING_TIME_TOLERANCE_MINUTES = 2
 
 
 class Coordinates(BaseModel):
-    lat: float
-    lng: float
+    lat: float = Field(ge=-90, le=90, allow_inf_nan=False)
+    lng: float = Field(ge=-180, le=180, allow_inf_nan=False)
 
 
 class Preferences(BaseModel):
@@ -242,15 +243,16 @@ class PlaceDetails(BaseModel):
 
 @router.get("/places/autocomplete", response_model=list[PlaceSuggestion])
 def autocomplete_places(query: str = Query(min_length=2, max_length=120)) -> list[PlaceSuggestion]:
-    """Google Places suggestions biased to inner Melbourne."""
+    """Restrict predictions to the CBD and check each actual place location."""
+    bounds = coverage_bounds()
     payload = {
         "input": query,
         "includedRegionCodes": ["au"],
         "languageCode": "en-AU",
-        "locationBias": {
-            "circle": {
-                "center": {"latitude": -37.8136, "longitude": 144.9631},
-                "radius": 50_000,
+        "locationRestriction": {
+            "rectangle": {
+                "low": {"latitude": bounds["south"], "longitude": bounds["west"]},
+                "high": {"latitude": bounds["north"], "longitude": bounds["east"]},
             }
         },
     }
@@ -260,13 +262,21 @@ def autocomplete_places(query: str = Query(min_length=2, max_length=120)) -> lis
         field_mask="suggestions.placePrediction.placeId,suggestions.placePrediction.text.text",
         json=payload,
     )
-    return [
-        PlaceSuggestion(
-            id=item["placePrediction"]["placeId"], label=item["placePrediction"]["text"]["text"]
-        )
-        for item in data.get("suggestions", [])
-        if "placePrediction" in item
-    ]
+    suggestions = []
+    for item in data.get("suggestions", []):
+        prediction = item.get("placePrediction")
+        if not prediction:
+            continue
+        # Restriction rectangles can still contain points outside the rotated
+        # grid. Resolve each prediction before exposing it to any search UI.
+        try:
+            place = place_details(prediction["placeId"])
+        except HTTPException as error:
+            if error.status_code in (404, 422):
+                continue
+            raise
+        suggestions.append(PlaceSuggestion(id=place.id, label=prediction["text"]["text"]))
+    return suggestions
 
 
 @router.get("/places/{place_id}", response_model=PlaceDetails)
@@ -277,11 +287,15 @@ def place_details(place_id: str) -> PlaceDetails:
         f"https://places.googleapis.com/v1/places/{place_id}",
         field_mask="id,displayName,location",
     )
-    location = data["location"]
+    location = data.get("location")
+    if not location:
+        raise HTTPException(status_code=404, detail="Place has no location.")
+    coordinates = Coordinates(lat=location["latitude"], lng=location["longitude"])
+    require_inside(coordinates.lat, coordinates.lng)
     return PlaceDetails(
         id=data["id"],
         label=data["displayName"]["text"],
-        coordinates=Coordinates(lat=location["latitude"], lng=location["longitude"]),
+        coordinates=coordinates,
     )
 
 
@@ -298,6 +312,9 @@ def plan_route(request: RouteRequest, session: SessionDep) -> RouteResult:
     choose between. What changed is that the choosing happens here instead of
     on screen.
     """
+    require_inside(request.origin.lat, request.origin.lng)
+    require_inside(request.destination.lat, request.destination.lng)
+
     if not settings.google_maps_api_key:
         raise HTTPException(status_code=503, detail="Google Routes API key is not configured.")
 
@@ -565,7 +582,12 @@ def _corridor_boxes(path: list[tuple[float, float]]) -> list[dict[str, float]]:
     """
     padding = 0.001  # ~110m: a bit more than TREE_CORRIDOR_M, trimmed exactly by _near()
     return [
-        {"south": lat - padding, "north": lat + padding, "west": lng - padding, "east": lng + padding}
+        {
+            "south": lat - padding,
+            "north": lat + padding,
+            "west": lng - padding,
+            "east": lng + padding,
+        }
         for lat, lng in path
     ]
 

@@ -507,7 +507,7 @@ def _data_notes(street_name: str | None) -> list[str]:
     The design decision is explicit: a gap is flagged on the card, not hidden
     and not filled with something invented. Both of these are real gaps today.
     """
-    notes = ["Allergy data is not available yet."]
+    notes = ["Pollen indicators are species-based proxies, not live pollen measurements."]
     if street_name is None:
         notes.insert(0, "No nearby street resolved; named by precinct.")
     return notes
