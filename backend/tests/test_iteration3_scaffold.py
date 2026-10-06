@@ -1,15 +1,8 @@
-"""Public contracts and safe failure while route planning is pending."""
+"""Public contract for route planning: what it accepts and refuses."""
 
 import pytest
 
 START = {"lat": -37.8183, "lng": 144.9671}
-
-
-@pytest.mark.parametrize("path", ["/api/sprout/route", "/api/sprout/areas"])
-def test_planning_contract_accepts_optional_preferences_but_is_pending(client, path):
-    response = client.post(path, json={"origin": START})
-    assert response.status_code == 501
-    assert response.json()["detail"]["code"] == "feature_not_implemented"
 
 
 @pytest.mark.parametrize("extra", [{"mood": "Stressed"}, {"preferences": {"mood": "Stressed"}}])
