@@ -25,9 +25,6 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:5173"
     database_url: str = ""
     google_maps_api_key: str = ""
-    supabase_url: str = ""
-    supabase_service_role_key: str = ""
-    supabase_photo_bucket: str = "tree-photos"
     posts_per_device_per_hour: int = Field(default=10, ge=1, le=1000)
     access_password: str = ""
     access_token_secret: str = ""
