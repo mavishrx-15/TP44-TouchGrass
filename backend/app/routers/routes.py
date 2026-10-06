@@ -250,7 +250,15 @@ class PlaceDetails(BaseModel):
 
 @router.get("/places/autocomplete", response_model=list[PlaceSuggestion])
 def autocomplete_places(query: str = Query(min_length=2, max_length=120)) -> list[PlaceSuggestion]:
-    """Restrict predictions to the CBD and check each actual place location."""
+    """Google Places suggestions restricted to the Melbourne CBD (Epic 5,
+    US5.5: "only places inside the CBD are suggested" everywhere a location
+    search appears).
+
+    A hard locationRestriction, not a bias - Sprout only knows the trees inside
+    the CBD, so a result outside it is unusable. Google only takes a rectangle,
+    and the grid is rotated, so the request uses the outline's bounding box and
+    each prediction is then checked against the outline itself.
+    """
     bounds = coverage_bounds()
     payload = {
         "input": query,

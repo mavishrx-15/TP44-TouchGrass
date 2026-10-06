@@ -7,10 +7,12 @@ from app.db import SessionDep
 from app.routers import (
     access,
     ai_chat,
+    care,
     cbd_data,
     map_data,
     routes,
     sprout_routes,
+    weather,
 )
 from app.security import require_access_token
 
@@ -48,5 +50,7 @@ for feature, prefix in (
     (routes.router, "/api"),
     (sprout_routes.router, "/api"),
     (ai_chat.router, "/api/ai"),
+    (weather.router, "/api/weather"),
+    (care.router, "/api/care"),
 ):
     app.include_router(feature, prefix=prefix, dependencies=[Depends(require_access_token)])

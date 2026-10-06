@@ -28,6 +28,9 @@ class Settings(BaseSettings):
     posts_per_device_per_hour: int = Field(default=10, ge=1, le=1000)
     access_password: str = ""
     access_token_secret: str = ""
+    # Shared secret for approving public tree messages and photos (Epic 7).
+    # Empty means nobody can approve, so nothing is ever published by accident.
+    care_admin_token: str = ""
     access_token_ttl_seconds: int = Field(default=3600, ge=60, le=86400)
 
     @property

@@ -1,6 +1,6 @@
 """Shared CBD coverage for maps, Places, routes and future tree pins.
 
-CBD_BOUNDARY overrides the provisional outline with a JSON GeoJSON coordinate
+CBD_BOUNDARY overrides the default outline with a JSON GeoJSON coordinate
 ring ([longitude, latitude]). Return this same ring to clients; never round a
 position to invent a zone id.
 """
@@ -59,3 +59,17 @@ def contains(lat: float, lng: float) -> bool:
 def require_inside(lat: float, lng: float) -> None:
     if not contains(lat, lng):
         raise HTTPException(status_code=422, detail="outside_cbd")
+
+
+def center() -> dict[str, float]:
+    """One point to stand for the CBD: the middle of the outline's bounding box.
+
+    The live temperature is read for a single location. Deriving it from the
+    outline rather than keeping a second hard-coded point means the CBD has one
+    definition, not two that can drift apart.
+    """
+    bounds = coverage_bounds()
+    return {
+        "lat": (bounds["south"] + bounds["north"]) / 2,
+        "lng": (bounds["west"] + bounds["east"]) / 2,
+    }

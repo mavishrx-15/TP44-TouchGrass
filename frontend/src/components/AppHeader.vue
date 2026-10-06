@@ -13,6 +13,7 @@ const navigation = [
   { label: 'Map', to: '/map' },
   { label: 'Tree Explorer', to: '/tree-explorer' },
   { label: 'Tree Health', to: '/tree-health' },
+  { label: 'Sprout’s look', to: '/rewards' },
 ]
 
 function goHome() {
