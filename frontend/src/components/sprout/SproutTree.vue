@@ -5,8 +5,7 @@ import { computed } from 'vue'
  * Sprout's animated tree character, ported from the approved clickable
  * prototype: the trunk/canopy shape, sway/bounce/blink/grow animations and
  * the five face expressions are the prototype's own SVG and keyframes
- * (classic skin only - the seasonal skins are Epic 8 reward content, out of
- * scope here). `prefers-reduced-motion` turns every animation off, same as
+ *. `prefers-reduced-motion` turns every animation off, same as
  * the prototype did.
  */
 const props = withDefaults(

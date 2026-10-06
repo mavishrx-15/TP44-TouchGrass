@@ -37,6 +37,8 @@ const router = createRouter({
       name: 'identify-tree',
       component: () => import('@/views/IdentifyTreeView.vue'),
     },
+    { path: '/walk', name: 'walk', component: () => import('@/views/WalkView.vue') },
+    { path: '/rewards', name: 'rewards', component: () => import('@/views/RewardsView.vue') },
   ],
   scrollBehavior() {
     return { top: 0, left: 0 }

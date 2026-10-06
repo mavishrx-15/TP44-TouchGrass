@@ -9,12 +9,21 @@ import type { PersonalisedRoute } from '@/types/personalisation'
 
 export type Mood = 'calm' | 'okay' | 'tense' | 'stressed' | 'overwhelmed'
 
-export const MOOD_OPTIONS: { value: Mood; label: string }[] = [
-  { value: 'calm', label: 'Calm' },
-  { value: 'okay', label: 'Okay' },
-  { value: 'tense', label: 'A bit tense' },
-  { value: 'stressed', label: 'Stressed' },
-  { value: 'overwhelmed', label: 'Overwhelmed' },
+// Face colour + mouth path per mood, straight from the prototype's own
+// stressOpts - the little face icon is what makes this step read instantly.
+// `stress` is the 1-5 level the stress gauge on the Feel step fills to.
+export const MOOD_OPTIONS: {
+  value: Mood
+  label: string
+  color: string
+  mouth: string
+  stress: number
+}[] = [
+  { value: 'calm', label: 'Calm', color: '#8fd07a', mouth: 'M13 23 Q20 30 27 23', stress: 1 },
+  { value: 'okay', label: 'Okay', color: '#b9d77a', mouth: 'M14 24 Q20 27 26 24', stress: 2 },
+  { value: 'tense', label: 'A bit tense', color: '#e6d27a', mouth: 'M14 25 L26 25', stress: 3 },
+  { value: 'stressed', label: 'Stressed', color: '#ecb173', mouth: 'M14 27 Q20 22 26 27', stress: 4 },
+  { value: 'overwhelmed', label: 'Overwhelmed', color: '#e8957a', mouth: 'M13 28 Q20 20 27 28', stress: 5 },
 ]
 
 const MOOD_REPLIES: Record<Mood, string> = {
@@ -35,10 +44,17 @@ export function moodNeedsCalmPreset(mood: Mood | null): boolean {
 }
 
 export type CanopyChoice = 'open' | 'mixed' | 'dense'
-export const CANOPY_OPTIONS: { value: CanopyChoice; label: string; sliderValue: number }[] = [
-  { value: 'open', label: 'Open sky', sliderValue: 10 },
-  { value: 'mixed', label: 'A bit of both', sliderValue: 50 },
-  { value: 'dense', label: 'Deep canopy', sliderValue: 100 },
+export const CANOPY_OPTIONS: {
+  value: CanopyChoice
+  label: string
+  sliderValue: number
+  treeCount: number
+  /** Short description under the label, as in the prototype. */
+  hint: string
+}[] = [
+  { value: 'open', label: 'Open sky', sliderValue: 10, treeCount: 1, hint: 'A few trees, plenty of light' },
+  { value: 'mixed', label: 'A bit of both', sliderValue: 50, treeCount: 3, hint: 'Leafy patches with some sun' },
+  { value: 'dense', label: 'Deep canopy', sliderValue: 100, treeCount: 6, hint: 'As many trees as possible' },
 ]
 const CANOPY_REPLIES: Record<CanopyChoice, string> = {
   open: 'Open skies it is! Just me and a bit of sunshine.',
@@ -56,10 +72,15 @@ export function canopyFromSlider(value: number | null): CanopyChoice | null {
 }
 
 export type ThermalChoice = 'sunny' | 'mixed' | 'cool'
-export const THERMAL_OPTIONS: { value: ThermalChoice; label: string; sliderValue: number }[] = [
-  { value: 'sunny', label: 'Sunny and open', sliderValue: 10 },
-  { value: 'mixed', label: 'A bit of both', sliderValue: 50 },
-  { value: 'cool', label: 'Cool and shaded', sliderValue: 100 },
+export const THERMAL_OPTIONS: {
+  value: ThermalChoice
+  label: string
+  sliderValue: number
+  hint: string
+}[] = [
+  { value: 'sunny', label: 'Sunny and open', sliderValue: 10, hint: 'I want to soak up some sun' },
+  { value: 'mixed', label: 'A bit of both', sliderValue: 50, hint: 'Sun with some shady breaks' },
+  { value: 'cool', label: 'Cool and shaded', sliderValue: 100, hint: 'Keep me out of the heat' },
 ]
 const THERMAL_REPLIES: Record<ThermalChoice, string> = {
   sunny: 'Bring water! I’m thirsty just thinking about it.',
@@ -102,7 +123,7 @@ export const AUTO_PRESET_NOTE =
 export function greeting(): { title: string; body: string } {
   return {
     title: 'Hi, I’m Sprout!',
-    body: 'A few quick questions and I’ll grow you a calmer, greener walk.',
+    body: 'One of the city’s trees. Feeling a bit much today? Answer a few quick questions and I’ll grow you a calmer, greener walk.',
   }
 }
 
@@ -112,6 +133,23 @@ export function placeChosenReply(label: string): string {
 
 export const OUTSIDE_CBD_REPLY =
   'That’s outside the CBD, so I don’t know the trees there yet - pick a start point inside the dashed area.'
+
+/** Sprout's bubble once a route request has failed (US5.6 failure state). */
+export const ROUTE_FAILURE_BUBBLE = 'Hmm, the route didn’t grow this time. Want to try again?'
+
+/**
+ * Turns whatever the route request threw into plain words. Raw browser text
+ * such as "Failed to fetch" never reaches the user.
+ */
+export function routeFailureMessage(raw: string | null): string {
+  if (raw && /no areas/i.test(raw)) {
+    return 'I couldn’t find a greener area near that start point. Try another one.'
+  }
+  if (!raw || /failed to fetch|network|load failed|abort/i.test(raw)) {
+    return 'I couldn’t reach the route service just now. Check your connection, then try again.'
+  }
+  return 'I couldn’t grow a route from that start point this time. Give it another try.'
+}
 
 export const DEFAULT_MAP_REPLY =
   'Tap a starting point. I only know the trees inside the dashed CBD area for now.'

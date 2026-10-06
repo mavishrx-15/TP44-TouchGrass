@@ -10,7 +10,7 @@ const GREETED_KEY = 'touchgrass.sprout.greeted.v1'
 const MOOD_KEY = 'touchgrass.sprout.mood.v1'
 
 export type SproutStep = 'greeting' | 'feel' | 'canopy' | 'shade' | 'journey' | 'location' | 'route'
-const STEP_ORDER: SproutStep[] = ['feel', 'canopy', 'shade', 'journey', 'location', 'route']
+export const STEP_ORDER: SproutStep[] = ['feel', 'canopy', 'shade', 'journey', 'location', 'route']
 
 function restoreMood(): Mood | null {
   try {
