@@ -5,14 +5,7 @@ import { distanceKm } from '@/services/discovery.service'
 
 // Tree zones this close to the destination are framed on the route view.
 const NEARBY_ZONE_KM = 0.5
-import type {
-  Coordinates,
-  DensityTier,
-  MapBounds,
-  RouteOption,
-  TreeRecord,
-  TreeZone,
-} from '@/types/discovery'
+import type { Coordinates, DensityTier, RouteOption, TreeRecord, TreeZone } from '@/types/discovery'
 
 const props = defineProps<{
   center: Coordinates
@@ -31,7 +24,8 @@ const props = defineProps<{
   // rely on it (MapView's search bar, the recommendation card thumbnail).
   autoCenter?: boolean
   // Epic 5, US5.5: "a dashed line marks the CBD edge" on Sprout's map step.
-  cbdBounds?: MapBounds
+  // The real Hoddle Grid outline from GET /api/cbd/zones, not a rectangle.
+  cbdOutline?: Coordinates[]
   // Epic 6: the live walk. Walked part is solid, the rest dashed.
   walkedPath?: Coordinates[]
   remainingPath?: Coordinates[]
@@ -54,7 +48,7 @@ let markers: google.maps.marker.AdvancedMarkerElement[] = []
 let rectangles: google.maps.Rectangle[] = []
 let routeLines: google.maps.Polyline[] = []
 let endpointMarkers: google.maps.marker.AdvancedMarkerElement[] = []
-let cbdOutline: google.maps.Polyline | null = null
+let cbdOutlineLine: google.maps.Polyline | null = null
 let walkLines: google.maps.Polyline[] = []
 let userMarker: google.maps.marker.AdvancedMarkerElement | null = null
 let messageMarkers: google.maps.marker.AdvancedMarkerElement[] = []
@@ -177,22 +171,14 @@ function renderZones() {
 }
 
 function renderCbdOutline() {
-  cbdOutline?.setMap(null)
-  cbdOutline = null
-  if (!map.value || !props.cbdBounds) return
-  const { north, south, east, west } = props.cbdBounds
-  const path = [
-    { lat: north, lng: west },
-    { lat: north, lng: east },
-    { lat: south, lng: east },
-    { lat: south, lng: west },
-    { lat: north, lng: west },
-  ]
-  // Rectangle has no dashed stroke option - a dashed line is a Polyline
-  // whose visible stroke is a repeating short-dash icon instead.
-  cbdOutline = new google.maps.Polyline({
+  cbdOutlineLine?.setMap(null)
+  cbdOutlineLine = null
+  if (!map.value || !props.cbdOutline?.length) return
+  // google.maps.Polygon's own stroke has no dashed option - a dashed line is
+  // a Polyline whose visible stroke is a repeating short-dash icon instead.
+  cbdOutlineLine = new google.maps.Polyline({
     map: map.value,
-    path,
+    path: props.cbdOutline,
     clickable: false,
     strokeOpacity: 0,
     zIndex: 2,
@@ -339,9 +325,15 @@ async function renderEndpoints() {
   ] as const) {
     if (!position) continue
     bounds.extend(position)
-    const content = document.createElement('span')
-    content.className =
-      title === 'Starting location' ? 'journey-origin-marker' : 'journey-destination-marker'
+    const isOrigin = title === 'Starting location'
+    const content = document.createElement('div')
+    content.className = 'journey-endpoint'
+    const dot = document.createElement('span')
+    dot.className = isOrigin ? 'journey-origin-marker' : 'journey-destination-marker'
+    const label = document.createElement('span')
+    label.className = isOrigin ? 'journey-endpoint-label origin' : 'journey-endpoint-label destination'
+    label.textContent = isOrigin ? 'Start' : 'End'
+    content.append(dot, label)
     // AdvancedMarkerElement's own `title` sets the accessible name but,
     // unlike the legacy Marker, doesn't show a hover tooltip - the DOM
     // element's native `title` attribute is what actually renders one.
@@ -462,7 +454,7 @@ watch(
 )
 watch(() => props.trees, renderMarkers, { deep: true })
 watch(() => props.zones, renderZones, { deep: true })
-watch(() => props.cbdBounds, renderCbdOutline, { deep: true })
+watch(() => props.cbdOutline, renderCbdOutline, { deep: true })
 watch(() => [props.directionsOpen, props.routeOptions], renderRoutes, {
   deep: true,
 })
@@ -476,7 +468,7 @@ onBeforeUnmount(() => {
   clearMarkers()
   clearRectangles()
   clearRoutes()
-  cbdOutline?.setMap(null)
+  cbdOutlineLine?.setMap(null)
   walkLines.forEach((line) => line.setMap(null))
   if (userMarker) userMarker.map = null
   messageMarkers.forEach((marker) => {
@@ -588,6 +580,10 @@ onBeforeUnmount(() => {
   font: 10px/1.3 system-ui;
   padding: 3px 6px;
 }
+.journey-endpoint {
+  position: relative;
+  display: block;
+}
 .journey-origin-marker,
 .journey-destination-marker {
   display: block;
@@ -604,6 +600,24 @@ onBeforeUnmount(() => {
   border: 6px solid #226934;
   border-radius: 50% 50% 50% 0;
   transform: rotate(-45deg);
+}
+.journey-endpoint-label {
+  position: absolute;
+  left: 50%;
+  top: calc(100% + 5px);
+  transform: translateX(-50%);
+  white-space: nowrap;
+  font: 700 11px/1.3 'Figtree', system-ui, sans-serif;
+  background: white;
+  border-radius: 999px;
+  padding: 2px 9px;
+  box-shadow: 0 2px 6px #0003;
+}
+.journey-endpoint-label.origin {
+  color: #2a63a8;
+}
+.journey-endpoint-label.destination {
+  color: #1f5a2c;
 }
 /* Epic 6: the live blue dot. Plain global class, because the marker is created imperatively. */
 .walk-user-dot {

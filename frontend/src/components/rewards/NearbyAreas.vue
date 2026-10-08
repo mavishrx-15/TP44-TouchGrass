@@ -2,52 +2,57 @@
 import { computed, onMounted } from 'vue'
 import { useJourneyStore } from '@/stores/journey'
 import { useRewardsStore } from '@/stores/rewards'
-import { POINTS_PER_WALK, visitedToday } from '@/services/rewards.logic'
-import type { Recommendation } from '@/types/personalisation'
+import { POINTS_PER_WALK, dayKey } from '@/services/rewards.logic'
+import type { AreaOption } from '@/types/planning'
 
 /**
- * US8.4 / Epic 8 "after a walk": three tree-dense areas nearby, ranked the same
- * way as "See other options" (it reads the same journey recommendations list).
- * Areas already visited today are left out. Layout follows the prototype's
- * numbered list with the points each area is worth.
+ * US8.4 / Epic 8 "after a walk": three tree-dense areas nearby, from
+ * POST /api/sprout/areas - the same ranking "Grow my route" itself uses.
+ * Areas already visited today are excluded server-side (the backend keeps no
+ * visit history of its own, so the device sends the zone ids to leave out).
+ * Layout follows the prototype's numbered list with the points each is worth.
  */
-const emit = defineEmits<{ pick: [area: Recommendation] }>()
+const emit = defineEmits<{ pick: [area: AreaOption] }>()
 
 const journey = useJourneyStore()
 const rewards = useRewardsStore()
 
-const now = new Date()
+const candidates = computed(() => journey.sproutAreas)
 
-const candidates = computed<Recommendation[]>(() =>
-  journey.recommendations.filter((area) => !visitedToday(rewards.state, area.id, now)).slice(0, 3),
-)
-
-/** An area with no visit on this device yet is a "new area". */
-function isNew(area: Recommendation): boolean {
-  return !rewards.state.visits.some((visit) => visit.zoneId === area.id)
+/** An area with no visit on this device, on any day, is a "new area". */
+function isNew(area: AreaOption): boolean {
+  return !rewards.state.visits.some((visit) => visit.zoneId === area.destination.zoneId)
 }
 
-onMounted(() => {
-  if (journey.startLocation && journey.recommendations.length === 0) {
-    void journey.refreshAreas()
-  }
-})
+function loadAreas() {
+  if (!journey.startLocation) return
+  const today = dayKey(new Date())
+  const excludedZoneIds = rewards.state.visits.filter((visit) => visit.date === today).map((visit) => visit.zoneId)
+  void journey.findSproutAreas({ excludedZoneIds, limit: 3 })
+}
+
+onMounted(loadAreas)
 </script>
 
 <template>
   <section class="nearby">
     <span class="eyebrow">FIND MORE TREES NEAR YOU</span>
     <p v-if="!journey.startLocation" class="empty">Choose a start point on the Journey map to see nearby areas.</p>
-    <p v-else-if="journey.areasLoading" class="empty">Looking for nearby areas…</p>
+    <p v-else-if="journey.sproutAreasLoading" class="empty">Looking for nearby areas…</p>
+    <p v-else-if="journey.sproutAreasError" class="empty">{{ journey.sproutAreasError }}</p>
     <p v-else-if="candidates.length === 0" class="empty">No other tree-dense areas to suggest right now.</p>
     <ol v-else class="list">
-      <li v-for="(area, index) in candidates" :key="area.id">
+      <li v-for="(area, index) in candidates" :key="area.destination.zoneId">
         <button type="button" class="area" @click="emit('pick', area)">
           <span class="number" aria-hidden="true">{{ index + 1 }}</span>
           <span class="text">
-            <span class="name">{{ area.precinctName }} · {{ area.nearestStreet ?? 'Nearby street' }}</span>
+            <span class="name">{{ area.destination.label }}</span>
             <span class="meta">
-              {{ area.treeCount }} trees · {{ area.estimatedMinutes }} min walk<template v-if="isNew(area)"> · new area</template>
+              {{ area.destination.treeCount }} trees · {{ Math.round(area.estimatedMinutes) }} min walk<template
+                v-if="isNew(area)"
+              >
+                · new area</template
+              >
             </span>
           </span>
           <span class="points">+{{ POINTS_PER_WALK }} pts</span>

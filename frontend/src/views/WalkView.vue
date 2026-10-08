@@ -1,16 +1,16 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { Clock, Location as LocationIcon, Warning } from '@element-plus/icons-vue'
+import { Clock, Location as LocationIcon, QuestionFilled, Warning } from '@element-plus/icons-vue'
 import GoogleMapCanvas from '@/components/GoogleMapCanvas.vue'
 import SproutTree from '@/components/sprout/SproutTree.vue'
 import GroundingSteps from '@/components/walk/GroundingSteps.vue'
 import PinTreeFlow from '@/components/walk/PinTreeFlow.vue'
 import StressCheckIn from '@/components/walk/StressCheckIn.vue'
 import NearbyAreas from '@/components/rewards/NearbyAreas.vue'
-import { CBD_BOUNDS, CBD_CENTER, CBD_PRECINCT_ID, isWithinCbd } from '@/constants/cbd'
-import { getPrecinctZones } from '@/services/discovery.service'
+import { CBD_CENTER, getZoneFacts, isWithinCbd, loadCbdZones, type ZoneFacts } from '@/constants/cbd'
 import { getApprovedMessages, type PublicMessage } from '@/services/care.service'
+import { decodePolyline } from '@/services/polyline'
 import { canopyFriendProgress, visitNumber } from '@/services/rewards.logic'
 import {
   ALMOST_RADIUS_M,
@@ -38,16 +38,14 @@ import {
   ARRIVED_TEXT,
   BEYOND_BLUE,
   END_TEXT,
+  HELP_TEXT,
   LOCATION_REASON,
   PAUSE_TEXT,
   REROUTE_QUESTION,
   RESUME_TEXT,
-  WALK_FOOTER,
   WORSE_TEXT,
   almostTip,
-  checkInReply,
   directionTip,
-  moodChangeSummary,
   treesTip,
   TIP_TEXT,
 } from '@/data/walkMessages'
@@ -55,7 +53,7 @@ import { useJourneyStore } from '@/stores/journey'
 import { useSproutStore } from '@/stores/sprout'
 import { useRewardsStore } from '@/stores/rewards'
 import type { Coordinates, TreeZone } from '@/types/discovery'
-import type { Recommendation } from '@/types/personalisation'
+import type { AreaOption } from '@/types/planning'
 import type { Mood } from '@/data/sproutMessages'
 
 /**
@@ -85,8 +83,10 @@ const accuracy = ref<number | null>(null)
 const paused = ref(false)
 const frozen = ref<WalkProgress | null>(null)
 const worse = ref(false)
+const helpOpen = ref(false)
 const clock = ref(Date.now())
 const zones = ref<TreeZone[]>([])
+const cbdOutline = ref<Coordinates[]>([])
 const tips = ref<{ id: number; kind: TipKind; text: string }[]>([])
 const rerouteOpen = ref(false)
 const rerouteDeclined = ref(false)
@@ -130,15 +130,49 @@ const walkStepIndex = computed(() => {
 })
 
 const zoneId = computed(() => journey.destination?.id ?? null)
-const destinationArea = computed<Recommendation | null>(
-  () => journey.recommendations.find((area) => area.id === journey.destination?.id) ?? null,
-)
 const destinationZone = computed<TreeZone | null>(() => zones.value.find((zone) => zone.id === zoneId.value) ?? null)
-const route = computed(() => journey.route)
+/** Real tree count and top species for the destination, from GET /api/zones/{id}/facts. */
+const destinationFacts = ref<ZoneFacts | null>(null)
 
-/** The walked route. Falls back to a straight line if the API sent no path. */
+/**
+ * The route actually being walked, normalised from whichever endpoint grew it.
+ *
+ * Sprout's own "grow a route" and "reroute from here" always call
+ * POST /api/sprout/route, which picks the destination itself - that's
+ * `journey.sproutRoute`. Choosing one specific area from "Find more trees
+ * near you" needs an explicit destination, which only the older
+ * POST /api/routes supports (`journey.route`); chooseArea() clears
+ * `sproutRoute` when it does this, so this always prefers the current one.
+ */
+const activeRoute = computed(() => {
+  const sproutRoute = journey.sproutRoute
+  if (sproutRoute) {
+    return {
+      durationMinutes: sproutRoute.durationMinutes,
+      distanceKm: sproutRoute.distanceMeters / 1000,
+      denseZoneShare: sproutRoute.denseZoneShare as number | null,
+      destinationTreeCount: sproutRoute.destination.treeCount as number | null,
+      summaryChips: sproutRoute.summaryChips,
+      path: decodePolyline(sproutRoute.encodedPolyline),
+    }
+  }
+  const legacy = journey.route
+  if (legacy) {
+    return {
+      durationMinutes: legacy.durationMinutes,
+      distanceKm: legacy.distanceKm,
+      denseZoneShare: legacy.metrics?.canopy != null ? legacy.metrics.canopy / 100 : null,
+      destinationTreeCount: destinationZone.value?.treeCount ?? null,
+      summaryChips: journey.summary,
+      path: legacy.path && legacy.path.length > 1 ? legacy.path : [],
+    }
+  }
+  return null
+})
+
+/** The walked route. Falls back to a straight line if neither endpoint sent a path. */
 const path = computed<Coordinates[]>(() => {
-  const points = route.value?.path
+  const points = activeRoute.value?.path
   if (points && points.length > 1) return points
   if (journey.startLocation && journey.destination) {
     return [journey.startLocation.coordinates, journey.destination.coordinates]
@@ -230,8 +264,9 @@ const sproutFace = computed<'happy' | 'concerned' | 'excited' | 'calm' | 'gratef
 
 async function loadZones() {
   try {
-    const precinctZones = await getPrecinctZones(CBD_PRECINCT_ID)
-    zones.value = precinctZones.filter((zone) => isWithinCbd(zone.center))
+    const cbd = await loadCbdZones()
+    zones.value = cbd.zones
+    cbdOutline.value = cbd.outline
   } catch {
     zones.value = []
   }
@@ -266,9 +301,9 @@ function evaluateTips(now: number) {
   if (phase.value !== 'walking' || paused.value) return
   const candidates: TipCandidate[] = []
   const live = liveProgress.value
-  const area = destinationArea.value
-  const topSpecies = area ? area.genera.slice(0, 2).map((genus) => genus.name) : []
-  const treeCount = area?.treeCount ?? destinationZone.value?.treeCount ?? 0
+  const topSpecies = destinationFacts.value?.topSpecies.slice(0, 2).map((species) => species.commonName) ?? []
+  const treeCount =
+    destinationFacts.value?.treeCount ?? activeRoute.value?.destinationTreeCount ?? destinationZone.value?.treeCount ?? 0
 
   // Distance-based tips need GPS. Without it, the clock decides instead.
   const destination = journey.destination?.coordinates
@@ -407,6 +442,11 @@ function beginWalk(mode: 'gps' | 'none' | 'demo') {
   startedAt = Date.now()
   clock.value = startedAt
   void keepScreenOn()
+  if (zoneId.value) {
+    getZoneFacts(zoneId.value)
+      .then((facts) => (destinationFacts.value = facts))
+      .catch(() => (destinationFacts.value = null))
+  }
   if (mode === 'demo') {
     startDemo()
     evaluateTips(startedAt)
@@ -484,7 +524,7 @@ function answerReroute(yes: boolean) {
     coordinates: { ...position.value },
   }
   offRoute = { offSince: null, shouldAsk: false }
-  void journey.calculate('WALK')
+  void journey.growSproutRoute()
 }
 
 async function arrive() {
@@ -513,7 +553,7 @@ function toCheckIn() {
   sproutFaceOverride.value = null
 }
 
-function logVisit(after: Mood) {
+function logVisit(after: Mood | null) {
   if (!zoneId.value) return
   const before = sprout.mood
   const number = visitNumber(rewards.state, zoneId.value)
@@ -534,9 +574,17 @@ function logVisit(after: Mood) {
   sproutFaceOverride.value = 'excited'
 }
 
-async function chooseArea(area: Recommendation) {
-  journey.destination = { id: area.id, label: area.label, coordinates: area.center }
+async function chooseArea(area: AreaOption) {
+  journey.destination = {
+    id: area.destination.zoneId,
+    label: area.destination.label,
+    coordinates: area.destination.center,
+  }
+  // The user picked this exact area, so the backend-chosen route from Sprout's
+  // own grow/reroute calls no longer applies - /api/routes takes a destination.
+  journey.sproutRoute = null
   await journey.calculate('WALK')
+  destinationFacts.value = null
   phase.value = 'intro'
   summaryText.value = ''
   tips.value = []
@@ -596,6 +644,20 @@ const mapCenterAuto = computed(() => phase.value === 'grounding')
         </span>
       </nav>
       <span class="live-label" :class="gps">{{ gpsLabel }}</span>
+      <div class="help-wrap">
+        <button
+          type="button"
+          class="help-button"
+          :aria-expanded="helpOpen"
+          @click="helpOpen = !helpOpen"
+        >
+          <ElIcon><QuestionFilled /></ElIcon> Help
+        </button>
+        <div v-if="helpOpen" class="help-panel" role="note">
+          <p>{{ HELP_TEXT }}</p>
+          <p>If things feel heavy, talk to someone. {{ BEYOND_BLUE.label }}: <strong>{{ BEYOND_BLUE.number }}</strong></p>
+        </div>
+      </div>
       <RouterLink class="text-button" to="/">Back to Sprout</RouterLink>
     </header>
 
@@ -613,11 +675,13 @@ const mapCenterAuto = computed(() => phase.value === 'grounding')
             :zones="zones"
             :directions-open="false"
             :route-options="[]"
+            :origin="journey.startLocation?.coordinates"
+            :destination="journey.destination?.coordinates"
             :walked-path="walkedPath"
             :remaining-path="remainingPath"
             :user-position="gps === 'on' ? position : null"
             :message-pins="messagePins"
-            :cbd-bounds="CBD_BOUNDS"
+            :cbd-outline="cbdOutline"
             :auto-center="mapCenterAuto"
             @select-message="onMessagePin"
           />
@@ -651,15 +715,17 @@ const mapCenterAuto = computed(() => phase.value === 'grounding')
             <h2>Walking to {{ journey.destination?.label }}</h2>
             <p class="from">From {{ journey.startLocation?.label }}</p>
             <div class="facts">
-              <div class="fact"><span>Walk time</span><strong>{{ route?.durationMinutes }} min</strong></div>
-              <div class="fact"><span>Distance</span><strong>{{ route?.distanceKm.toFixed(1) }} km</strong></div>
-              <div v-if="destinationArea" class="fact"><span>Area trees</span><strong>{{ destinationArea.treeCount }}</strong></div>
-              <div v-if="route?.metrics?.canopy != null" class="fact">
-                <span>Tree-dense share</span><strong>{{ Math.round(route.metrics.canopy) }}%</strong>
+              <div class="fact"><span>Walk time</span><strong>{{ activeRoute?.durationMinutes }} min</strong></div>
+              <div class="fact"><span>Distance</span><strong>{{ activeRoute?.distanceKm.toFixed(1) }} km</strong></div>
+              <div v-if="activeRoute?.destinationTreeCount != null" class="fact">
+                <span>Area trees</span><strong>{{ activeRoute.destinationTreeCount }}</strong>
+              </div>
+              <div v-if="activeRoute?.denseZoneShare != null" class="fact">
+                <span>Tree-dense share</span><strong>{{ Math.round(activeRoute.denseZoneShare * 100) }}%</strong>
               </div>
             </div>
-            <div v-if="journey.summary.length" class="chips">
-              <span v-for="chip in journey.summary" :key="chip" class="chip">{{ chip }}</span>
+            <div v-if="activeRoute?.summaryChips.length" class="chips">
+              <span v-for="chip in activeRoute.summaryChips" :key="chip" class="chip">{{ chip }}</span>
             </div>
           </article>
           <p class="reason">{{ LOCATION_REASON }}</p>
@@ -678,12 +744,13 @@ const mapCenterAuto = computed(() => phase.value === 'grounding')
             <span class="eyebrow">WALKING TO</span>
             <h2>{{ journey.destination?.label }}</h2>
             <p class="from">
-              From {{ journey.startLocation?.label }} · {{ route?.durationMinutes }} min · {{ route?.distanceKm.toFixed(1) }} km
-              <template v-if="destinationArea"> · {{ destinationArea.treeCount }} trees</template>
+              From {{ journey.startLocation?.label }} · {{ activeRoute?.durationMinutes }} min ·
+              {{ activeRoute?.distanceKm.toFixed(1) }} km
+              <template v-if="activeRoute?.destinationTreeCount != null"> · {{ activeRoute.destinationTreeCount }} trees</template>
             </p>
           </div>
-          <div v-if="journey.summary.length" class="chips">
-            <span v-for="chip in journey.summary" :key="chip" class="chip">{{ chip }}</span>
+          <div v-if="activeRoute?.summaryChips.length" class="chips">
+            <span v-for="chip in activeRoute.summaryChips" :key="chip" class="chip">{{ chip }}</span>
           </div>
           <div class="progress-block">
             <div class="progress-head">
@@ -730,10 +797,6 @@ const mapCenterAuto = computed(() => phase.value === 'grounding')
             <button type="button" class="text-button danger" @click="endWalk">End walk</button>
           </div>
 
-          <aside v-if="worse" class="support" role="note">
-            <p>{{ BEYOND_BLUE.label }}: <strong>{{ BEYOND_BLUE.number }}</strong></p>
-          </aside>
-
           <div v-if="tips.length" class="tips">
             <span class="eyebrow">SPROUT’S LIVE TIPS</span>
             <ul>
@@ -753,7 +816,10 @@ const mapCenterAuto = computed(() => phase.value === 'grounding')
           </p>
           <article class="here">
             <span class="eyebrow">YOU’RE HERE</span>
-            <strong>{{ journey.destination?.label }} · {{ destinationArea?.treeCount ?? destinationZone?.treeCount ?? 0 }} trees</strong>
+            <strong
+              >{{ journey.destination?.label }} ·
+              {{ destinationFacts?.treeCount ?? destinationZone?.treeCount ?? 0 }} trees</strong
+            >
           </article>
           <GroundingSteps @done="toPin" />
           <div v-if="pinMessages.length" class="messages">
@@ -809,7 +875,6 @@ const mapCenterAuto = computed(() => phase.value === 'grounding')
       </section>
     </div>
 
-    <footer class="walk-footer">{{ WALK_FOOTER }}</footer>
   </div>
 </template>
 
@@ -957,6 +1022,7 @@ const mapCenterAuto = computed(() => phase.value === 'grounding')
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 16px;
   padding: 12px 24px;
   background: white;
   border-bottom: 1px solid var(--tg-border);
@@ -1126,22 +1192,48 @@ h2 {
   gap: 6px;
   align-items: center;
 }
-.reroute,
-.support {
+.reroute {
   border-radius: 12px;
   padding: 12px 14px;
   font-size: 0.9rem;
-}
-.reroute {
   border: 1.5px solid #e9b98a;
   background: #fff6ec;
 }
-.reroute p,
-.support p {
+.reroute p {
   margin: 0 0 8px;
 }
-.support {
+.help-wrap {
+  position: relative;
+}
+.help-button {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border: none;
+  background: none;
+  padding: 0;
+  font-size: 0.84rem;
+  font-weight: 700;
+  color: var(--tg-green-700);
+  cursor: pointer;
+}
+.help-panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  z-index: 5;
+  width: 260px;
+  border-radius: 12px;
+  padding: 12px 14px;
+  font-size: 0.86rem;
   background: #eef4fb;
+  box-shadow: 0 10px 24px #1d2a1d26;
+}
+.help-panel p {
+  margin: 0 0 8px;
+}
+.help-panel p:last-child {
+  margin-bottom: 0;
 }
 .tips ul,
 .messages ul {
@@ -1245,13 +1337,6 @@ h2 {
 }
 .text-button.danger {
   color: #b44235;
-}
-.walk-footer {
-  padding: 10px 24px;
-  font-size: 0.78rem;
-  color: var(--tg-muted);
-  border-top: 1px solid var(--tg-border);
-  background: white;
 }
 @media (max-width: 800px) {
   .walk-layout {

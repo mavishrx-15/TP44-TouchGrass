@@ -5,7 +5,7 @@ import NearbyAreas from '@/components/rewards/NearbyAreas.vue'
 import { useJourneyStore } from '@/stores/journey'
 import { useRewardsStore } from '@/stores/rewards'
 import { CANOPY_FRIEND_DAYS, POINTS_PER_WALK, canopyFriendProgress, type Visit } from '@/services/rewards.logic'
-import type { Recommendation } from '@/types/personalisation'
+import type { AreaOption } from '@/types/planning'
 import { ref } from 'vue'
 
 /**
@@ -16,7 +16,7 @@ const router = useRouter()
 const journey = useJourneyStore()
 const rewards = useRewardsStore()
 
-const picked = ref<Recommendation | null>(null)
+const picked = ref<AreaOption | null>(null)
 
 /** One card per visited area, grouped by area id. */
 const badges = computed(() => {
@@ -37,9 +37,15 @@ const badges = computed(() => {
   })
 })
 
-async function choose(area: Recommendation) {
+async function choose(area: AreaOption) {
   picked.value = area
-  journey.destination = { id: area.id, label: area.label, coordinates: area.center }
+  journey.destination = {
+    id: area.destination.zoneId,
+    label: area.destination.label,
+    coordinates: area.destination.center,
+  }
+  // An explicit pick needs an explicit destination, which only /api/routes takes.
+  journey.sproutRoute = null
   await journey.calculate('WALK')
 }
 
@@ -84,7 +90,7 @@ function startWalk() {
 
     <section v-if="picked && journey.route" class="card route" aria-label="Picked route">
       <span class="eyebrow">PERSONALISED WALKING ROUTE</span>
-      <h2>{{ picked.precinctName }} · {{ picked.nearestStreet ?? 'Nearby street' }}</h2>
+      <h2>{{ picked.destination.label }}</h2>
       <p class="muted">{{ journey.route.distanceKm.toFixed(1) }} km · about {{ journey.route.durationMinutes }} min walk</p>
       <button type="button" class="primary-button" @click="startWalk">Start walk</button>
     </section>

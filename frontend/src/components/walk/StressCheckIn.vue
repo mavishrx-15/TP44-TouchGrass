@@ -1,19 +1,15 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { MOOD_OPTIONS, type Mood } from '@/data/sproutMessages'
-import {
-  BEYOND_BLUE,
-  checkInReply,
-  moodChangeSummary,
-  showBeyondBlue,
-} from '@/data/walkMessages'
+import { checkInReply, moodChangeSummary } from '@/data/walkMessages'
 
 /**
  * US6.6: rate how stressed you feel now. If Epic 5 captured a mood before the
  * walk, the before and after sit side by side. If not, only "Now" shows.
+ * Rating is optional - "Skip" logs the walk without recording a mood.
  */
 const props = defineProps<{ before: Mood | null }>()
-const emit = defineEmits<{ log: [after: Mood] }>()
+const emit = defineEmits<{ log: [after: Mood | null] }>()
 
 const now = ref<Mood | null>(null)
 const beforeOption = computed(() => MOOD_OPTIONS.find((option) => option.value === props.before) ?? null)
@@ -28,10 +24,12 @@ const reply = computed(() => {
   }
   return 'How stressed do you feel now?'
 })
-const showSupport = computed(() => (now.value ? showBeyondBlue(props.before, now.value) : false))
 
 function log() {
   if (now.value) emit('log', now.value)
+}
+function skip() {
+  emit('log', null)
 }
 </script>
 
@@ -77,13 +75,12 @@ function log() {
       <strong>{{ nowOption.label }}</strong>
     </div>
 
-    <aside v-if="showSupport" class="support" role="note">
-      <p>If things still feel heavy, talk to someone. {{ BEYOND_BLUE.label }} is there: <strong>{{ BEYOND_BLUE.number }}</strong></p>
-    </aside>
-
-    <button type="button" class="primary-button" :disabled="!now" @click="log">
-      {{ now ? 'Log my visit' : 'Pick how you feel first' }}
-    </button>
+    <div class="actions">
+      <button type="button" class="primary-button" :disabled="!now" @click="log">
+        {{ now ? 'Log my visit' : 'Pick how you feel first' }}
+      </button>
+      <button type="button" class="text-button" @click="skip">Skip</button>
+    </div>
   </section>
 </template>
 
@@ -158,14 +155,10 @@ h3 {
   letter-spacing: 0.1em;
   color: var(--tg-green-700);
 }
-.support {
-  border-radius: 12px;
-  background: #eef4fb;
-  padding: 10px 12px;
-  font-size: 0.86rem;
-}
-.support p {
-  margin: 0;
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
 }
 .primary-button {
   background: var(--tg-green-800);
@@ -176,6 +169,14 @@ h3 {
   font-weight: 700;
   cursor: pointer;
   justify-self: start;
+}
+.text-button {
+  background: none;
+  border: none;
+  color: var(--tg-green-700);
+  font-weight: 700;
+  cursor: pointer;
+  padding: 0;
 }
 .primary-button:disabled {
   opacity: 0.6;

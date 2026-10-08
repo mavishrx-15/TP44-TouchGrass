@@ -42,7 +42,7 @@ export const useRewardsStore = defineStore('rewards', () => {
     zoneId: string
     label?: string
     before: Mood | null
-    after: Mood
+    after: Mood | null
     now?: Date
   }) {
     const result = recordVisit(state.value, { now: new Date(), ...input })

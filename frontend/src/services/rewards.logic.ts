@@ -18,7 +18,8 @@ export interface Visit {
   /** ISO timestamp of the visit. */
   at: string
   before: Mood | null
-  after: Mood
+  /** Null when the end-of-walk feeling check-in was skipped. */
+  after: Mood | null
 }
 
 export interface RewardsState {
@@ -44,7 +45,7 @@ export function visitedToday(state: RewardsState, zoneId: string, now: Date): bo
  */
 export function recordVisit(
   state: RewardsState,
-  input: { zoneId: string; label?: string; before: Mood | null; after: Mood; now: Date },
+  input: { zoneId: string; label?: string; before: Mood | null; after: Mood | null; now: Date },
 ): { state: RewardsState; awarded: number; duplicate: boolean } {
   if (visitedToday(state, input.zoneId, input.now)) {
     return { state, awarded: 0, duplicate: true }

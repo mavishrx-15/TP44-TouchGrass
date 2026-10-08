@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { findDamageWord, friendlyError, moodChangeSummary, showBeyondBlue } from '@/data/walkMessages'
+import { findDamageWord, friendlyError, moodChangeSummary } from '@/data/walkMessages'
 
 describe('damage words (US7.4)', () => {
   it('finds a listed word as a whole word, case-insensitively', () => {
@@ -18,13 +18,6 @@ describe('mood change (US6.6)', () => {
     expect(moodChangeSummary('stressed', 'calm').text).toBe('Down 3 levels since your walk started')
     expect(moodChangeSummary('calm', 'tense').text).toBe('Up 2 levels')
     expect(moodChangeSummary('okay', 'okay').text).toBe('About the same as before')
-  })
-
-  it('shows Beyond Blue only for a high rating that is not lower than before', () => {
-    expect(showBeyondBlue('stressed', 'overwhelmed')).toBe(true)
-    expect(showBeyondBlue('overwhelmed', 'stressed')).toBe(false)
-    expect(showBeyondBlue(null, 'stressed')).toBe(true)
-    expect(showBeyondBlue('calm', 'okay')).toBe(false)
   })
 })
 

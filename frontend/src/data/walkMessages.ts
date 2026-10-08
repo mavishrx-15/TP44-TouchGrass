@@ -7,7 +7,8 @@ import type { Mood } from '@/data/sproutMessages'
 
 export const BEYOND_BLUE = { label: 'Beyond Blue', number: '1300 22 4636' } as const
 
-export const WALK_FOOTER = `Sprout is a tree guide, not a counsellor. ${BEYOND_BLUE.label} ${BEYOND_BLUE.number}`
+/** Shown only behind the walk page's Help button, not thrust in front of a stressed user. */
+export const HELP_TEXT = 'Sprout is a tree guide, not a counsellor.'
 
 export const LOCATION_REASON =
   'I need your location to show where you are on the route. It stays on your phone and is never stored.'
@@ -119,14 +120,6 @@ export function checkInReply(direction: 'down' | 'same' | 'up'): string {
   if (direction === 'down') return 'Yes! Your walk helped. Let’s keep that feeling going.'
   if (direction === 'same') return 'That’s steady, and steady is good. I’m glad you took the time.'
   return 'Thanks for telling me honestly. Be gentle with yourself today.'
-}
-
-/** US6.6: Beyond Blue is shown when the rating is Stressed or Overwhelmed and not lower than before. */
-export function showBeyondBlue(before: Mood | null, now: Mood): boolean {
-  const high = now === 'stressed' || now === 'overwhelmed'
-  if (!high) return false
-  if (before === null) return true
-  return MOOD_LEVEL[now] >= MOOD_LEVEL[before]
 }
 
 /**

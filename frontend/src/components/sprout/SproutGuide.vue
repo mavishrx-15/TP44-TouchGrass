@@ -9,8 +9,7 @@ import GoogleMapCanvas from '@/components/GoogleMapCanvas.vue'
 import { useJourneyStore } from '@/stores/journey'
 import { useSproutStore } from '@/stores/sprout'
 import { useAccessibilityStore } from '@/stores/accessibility'
-import { CBD_BOUNDS, CBD_CENTER, CBD_PRECINCT_ID, isWithinCbd } from '@/constants/cbd'
-import { getPrecinctZones } from '@/services/discovery.service'
+import { CBD_CENTER, CBD_PRECINCT_ID, isWithinCbd, loadCbdZones } from '@/constants/cbd'
 import { getCbdWeather } from '@/services/weather.service'
 import {
   AUTO_PRESET_NOTE,
@@ -27,7 +26,6 @@ import {
   moodReply,
   noiseReply,
   placeChosenReply,
-  routeExplanation,
   routeFailureMessage,
   temperaturePrompt,
   thermalFromSlider,
@@ -35,7 +33,7 @@ import {
   type Mood,
 } from '@/data/sproutMessages'
 import type { Preferences } from '@/types/personalisation'
-import type { Precinct, TreeZone, RoutePlace } from '@/types/discovery'
+import type { Coordinates, Precinct, RouteOption, TreeZone, RoutePlace } from '@/types/discovery'
 import { STEP_ORDER, type SproutStep } from '@/stores/sprout'
 
 const STEP_LABELS: Record<SproutStep, string> = {
@@ -54,6 +52,8 @@ const accessibility = useAccessibilityStore()
 const router = useRouter()
 
 const zones = ref<TreeZone[]>([])
+const zoneCount = ref(0)
+const cbdOutline = ref<Coordinates[]>([])
 const zonesError = ref('')
 const temperature = ref<number | null>(null)
 const temperatureAvailable = ref(false)
@@ -120,14 +120,32 @@ const stageSkyClass = computed(() =>
 async function loadZones() {
   zonesError.value = ''
   try {
-    // The "melbourne" precinct is the full municipal area; CBD_BOUNDS trims
-    // it to the Hoddle Grid a user actually recognises as "the CBD".
-    const precinctZones = await getPrecinctZones(CBD_PRECINCT_ID)
-    zones.value = precinctZones.filter((zone) => isWithinCbd(zone.center))
+    // GET /api/cbd/zones is already the real Hoddle Grid polygon, not a
+    // precinct - no client-side CBD filtering needed any more.
+    const cbd = await loadCbdZones()
+    zones.value = cbd.zones
+    cbdOutline.value = cbd.outline
+    zoneCount.value = cbd.zoneCount
   } catch {
     zonesError.value = 'The CBD map could not be loaded.'
   }
 }
+
+/** Adapts Sprout's route to the shape GoogleMapCanvas's routeOptions expects. */
+const mapRouteOptions = computed<RouteOption[]>(() => {
+  const route = journey.sproutRoute
+  if (sprout.step !== 'route' || !route) return []
+  return [
+    {
+      id: 'personalised',
+      label: route.destination.label,
+      durationMinutes: route.durationMinutes,
+      distanceKm: route.distanceMeters / 1000,
+      treeCount: route.destination.treeCount,
+      encodedPolyline: route.encodedPolyline,
+    },
+  ]
+})
 
 async function loadWeather() {
   try {
@@ -170,7 +188,11 @@ const sproutLine = computed(() => {
       if (locationError.value) return OUTSIDE_CBD_REPLY
       return journey.startLocation ? placeChosenReply(journey.startLocation.label) : DEFAULT_MAP_REPLY
     case 'route':
-      if (journey.route) return routeExplanation(journey.route)
+      if (journey.sproutRoute) {
+        // Sprout's own fixed-template sentence (backend/app/services/sprout.py) -
+        // never generated here, so it can never claim a match the route didn't make.
+        return journey.sproutRoute.explanation ?? `Here's a walk to ${journey.sproutRoute.destination.label}.`
+      }
       return growError.value ? ROUTE_FAILURE_BUBBLE : 'Growing your route…'
     default:
       return ''
@@ -194,7 +216,7 @@ const sproutFace = computed(() => {
       if (locationError.value) return 'concerned'
       return journey.startLocation ? 'excited' : 'happy'
     case 'route':
-      if (journey.route) return 'excited'
+      if (journey.sproutRoute) return 'excited'
       return growError.value ? 'concerned' : 'happy'
     default:
       return 'happy'
@@ -238,8 +260,8 @@ async function growRoute() {
   growing.value = true
   growError.value = ''
   try {
-    const ok = await journey.findGreenerRoute()
-    if (!ok) growError.value = routeFailureMessage(journey.error)
+    const ok = await journey.growSproutRoute()
+    if (!ok) growError.value = routeFailureMessage(journey.sproutRouteError)
     // US5.6: a failed request still shows Sprout's plain message and a Try
     // again button (the Route step's own failure view), not a dead end on
     // the Location step.
@@ -326,17 +348,16 @@ watch(
               :trees="[]"
               :zones="zones"
               :directions-open="sprout.step === 'route'"
-              :route-options="sprout.step === 'route' && journey.route ? [journey.route] : []"
+              :route-options="mapRouteOptions"
               :origin="journey.startLocation?.coordinates"
               :destination="sprout.step === 'route' ? journey.destination?.coordinates : undefined"
-              :preview-path="sprout.step === 'route' ? journey.route?.path : undefined"
-              :cbd-bounds="CBD_BOUNDS"
+              :cbd-outline="cbdOutline"
               :auto-center="false"
             />
           </div>
           <span class="map-label">TOUCHGRASS COVERS THE CBD</span>
           <div class="map-legend" aria-label="Map legend">
-            <span class="legend-title">TREE DENSITY · {{ zones.length }} ZONES</span>
+            <span class="legend-title">TREE DENSITY · {{ zoneCount }} ZONES</span>
             <span><i class="swatch high" />High</span>
             <span><i class="swatch medium" />Medium</span>
             <span><i class="swatch low" />Low</span>
@@ -392,22 +413,30 @@ watch(
 
           <!-- Step 6: route -->
           <template v-else-if="sprout.step === 'route'">
-            <template v-if="journey.route">
+            <template v-if="journey.sproutRoute">
               <span class="eyebrow">YOUR GREENER ROUTE</span>
-              <h2>A leafy, calm walk to {{ journey.destination?.label }}</h2>
+              <h2>A leafy, calm walk to {{ journey.sproutRoute.destination.label }}</h2>
               <div class="route-facts">
                 <div class="fact">
                   <span>WALK TIME</span>
-                  <strong>{{ journey.route.durationMinutes }} min · {{ journey.route.distanceKm.toFixed(1) }} km</strong>
+                  <strong
+                    >{{ journey.sproutRoute.durationMinutes }} min ·
+                    {{ (journey.sproutRoute.distanceMeters / 1000).toFixed(1) }} km</strong
+                  >
                 </div>
-                <div v-if="journey.route.metrics?.canopy != null" class="fact">
+                <div class="fact">
                   <span>THROUGH TREE-DENSE ZONES</span>
-                  <strong>{{ Math.round(journey.route.metrics.canopy) }}%</strong>
+                  <strong>{{ Math.round(journey.sproutRoute.denseZoneShare * 100) }}%</strong>
                 </div>
               </div>
-              <div v-if="journey.summary.length" class="preference-chips">
-                <span v-for="chip in journey.summary" :key="chip" class="preference-chip">{{ chip }}</span>
+              <div v-if="journey.sproutRoute.summaryChips.length" class="preference-chips">
+                <span v-for="chip in journey.sproutRoute.summaryChips" :key="chip" class="preference-chip">{{
+                  chip
+                }}</span>
               </div>
+              <p v-if="journey.sproutRoute.message" class="route-note" role="status">
+                {{ journey.sproutRoute.message }}
+              </p>
               <div class="route-actions">
                 <button type="button" class="primary-button" @click="startWalk">Start walk</button>
                 <button type="button" class="ghost-button" @click="changeAnswers">Change answers</button>
@@ -617,7 +646,10 @@ watch(
 
           <div class="step-nav">
             <button type="button" class="text-button" @click="sprout.back">Back</button>
-            <button type="button" class="primary-button" @click="sprout.next">{{ nextButtonLabel }}</button>
+            <div class="step-nav-right">
+              <button type="button" class="ghost-button" @click="sprout.skipToMap">Skip to map</button>
+              <button type="button" class="primary-button" @click="sprout.next">{{ nextButtonLabel }}</button>
+            </div>
           </div>
         </section>
       </div>
@@ -978,9 +1010,13 @@ h2 {
   align-items: flex-start;
   gap: 12px;
   flex-wrap: wrap;
+  /* Spacing to the option cards below lives here, not on h2's own margin -
+     when the chip wraps onto its own line, a child's margin stops reliably
+     creating space between flex-wrap lines. */
+  margin: 6px 0 20px;
 }
 .step-heading-row h2 {
-  margin-bottom: 18px;
+  margin: 0;
 }
 .temp-chip {
   font-size: 0.74rem;
@@ -989,7 +1025,7 @@ h2 {
   background: #f7ead2;
   border-radius: 999px;
   padding: 4px 11px;
-  margin-top: 10px;
+  white-space: nowrap;
 }
 fieldset {
   border: 0;
@@ -1192,6 +1228,21 @@ fieldset legend {
   gap: 10px;
   margin-top: 26px;
 }
+.step-nav-right {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 10px;
+}
+.step-nav-right .ghost-button,
+.step-nav-right .primary-button {
+  /* Overrides global.css's .primary-button { width: 100% } - without this,
+     the button claims the whole row and only looked right by accident,
+     because flex-shrink used to be free to crush it back down. */
+  width: auto;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
 .route-actions {
   justify-content: flex-start;
   margin-top: 4px;
@@ -1200,6 +1251,14 @@ fieldset legend {
   margin: 0;
   font-size: 0.74rem;
   color: #6b766a;
+}
+.route-note {
+  margin: 0;
+  font-size: 0.78rem;
+  color: #8a6a2e;
+  background: #f7ead2;
+  border-radius: 10px;
+  padding: 8px 12px;
 }
 .location-button {
   display: flex;

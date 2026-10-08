@@ -123,7 +123,7 @@ export const AUTO_PRESET_NOTE =
 export function greeting(): { title: string; body: string } {
   return {
     title: 'Hi, I’m Sprout!',
-    body: 'One of the city’s trees. Feeling a bit much today? Answer a few quick questions and I’ll grow you a calmer, greener walk.',
+    body: 'One of Melbourne’s city trees. Feeling a bit much today? Answer a few quick questions and I’ll grow you a calmer, greener walk.',
   }
 }
 
