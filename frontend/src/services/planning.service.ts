@@ -28,10 +28,15 @@ export function growRoute(
   origin: Coordinates,
   preferences: Preferences,
   signal?: AbortSignal,
+  destinationZoneId?: string,
 ): Promise<PlannedRoute> {
   return apiPost<PlannedRoute>(
     '/api/sprout/route',
-    { origin, preferences: buildPlanningPreferences(preferences) },
+    {
+      origin,
+      preferences: buildPlanningPreferences(preferences),
+      ...(destinationZoneId ? { destinationZoneId } : {}),
+    },
     signal,
   )
 }

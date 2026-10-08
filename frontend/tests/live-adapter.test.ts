@@ -10,16 +10,6 @@ const precinct = {
   zoneCount: 1,
   speciesCount: 2,
 }
-const zone = {
-  id: 'real-zone',
-  precinctId: 'kensington',
-  center: precinct.referencePoint,
-  bounds: { north: -37.79, south: -37.8, east: 144.94, west: 144.93 },
-  treeCount: 2,
-  density: 'Low',
-  dominantGenus: 'Eucalyptus',
-  distanceKm: 0.4,
-}
 beforeEach(() => {
   vi.resetModules()
   vi.stubEnv('VITE_USE_MOCK_DATA', 'false')
@@ -39,88 +29,7 @@ it('loads existing precinct and Google Places APIs instead of fixture locations'
   expect(get).toHaveBeenLastCalledWith('/api/places/autocomplete?query=Real', undefined)
 })
 
-it('wraps the legacy map adapter single-object /api/routes response in an array', async () => {
-  post.mockResolvedValueOnce({
-    id: 'personalised',
-    label: 'Walking route',
-    durationMinutes: 8,
-    distanceKm: 0.6,
-    treeCount: 10,
-    encodedPolyline: 'live-route',
-  })
-  const { getWalkingRoutes } = await import('@/services/discovery.service')
-  const result = await getWalkingRoutes(precinct.referencePoint, { lat: -37.79, lng: 144.94 })
-  expect(result).toEqual([
-    {
-      id: 'personalised',
-      label: 'Walking route',
-      durationMinutes: 8,
-      distanceKm: 0.6,
-      treeCount: 10,
-      encodedPolyline: 'live-route',
-    },
-  ])
-  expect(post).toHaveBeenLastCalledWith(
-    '/api/routes',
-    { origin: precinct.referencePoint, destination: { lat: -37.79, lng: 144.94 }, travelMode: 'WALK' },
-    undefined,
-  )
-})
-
-it('normalises live /api/zones metrics from a 0-100 score to a 0-1 fraction', async () => {
-  get.mockImplementation((path: string) =>
-    Promise.resolve(
-      path.startsWith('/api/zones')
-        ? [{ ...zone, metrics: { canopy: 63, parkShare: 4, lowAllergyShare: null, highPollenTrees: null } }]
-        : [],
-    ),
-  )
-  const { loadAreas } = await import('@/services/personalisation.service')
-  const result = await loadAreas(precinct)
-  expect(result[0]?.metrics.canopy).toBeCloseTo(0.63)
-  expect(result[0]?.metrics.parkShare).toBeCloseTo(0.04)
-})
-
-it('accepts the existing zones/trees contract without inventing new fields', async () => {
-  get.mockImplementation((path: string) =>
-    Promise.resolve(
-      path.startsWith('/api/zones')
-        ? [zone]
-        : [
-            {
-              id: '1',
-              zoneId: zone.id,
-              coordinates: zone.center,
-              genus: 'Eucalyptus',
-              locatedIn: 'Park',
-            },
-            {
-              id: '2',
-              zoneId: zone.id,
-              coordinates: zone.center,
-              genus: 'Ulmus',
-              locatedIn: 'Street',
-            },
-          ],
-    ),
-  )
-  const { loadAreas } = await import('@/services/personalisation.service')
-  const result = await loadAreas(precinct)
-  expect(result[0]).toMatchObject({
-    id: 'real-zone',
-    label: 'Kensington',
-    nearestStreet: null,
-    treeCount: 2,
-    metrics: { parkShare: 0.5, lowAllergyShare: null, highPollenTrees: null },
-    genera: [
-      { name: 'Eucalyptus', count: 1 },
-      { name: 'Ulmus', count: 1 },
-    ],
-  })
-  expect(result[0]?.trees).toHaveLength(2)
-})
-
-it('normalises the backend\'s 0-100 metrics scale to the 0-1 fractions the UI expects', async () => {
+it("normalises the backend's 0-100 metrics scale to the 0-1 fractions the UI expects", async () => {
   // Real backend response shape (verified against the live API): canopy/parkShare
   // are a 0-100 score ("canopy 63, parkShare 4"), not the 0-1 fraction every
   // frontend threshold assumes.

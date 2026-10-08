@@ -1,21 +1,24 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { Clock, Location as LocationIcon, QuestionFilled, Warning } from '@element-plus/icons-vue'
+import { Location as LocationIcon, QuestionFilled, Warning } from '@element-plus/icons-vue'
 import GoogleMapCanvas from '@/components/GoogleMapCanvas.vue'
+import LeafPointsIcon from '@/components/LeafPointsIcon.vue'
 import SproutTree from '@/components/sprout/SproutTree.vue'
 import GroundingSteps from '@/components/walk/GroundingSteps.vue'
 import PinTreeFlow from '@/components/walk/PinTreeFlow.vue'
 import StressCheckIn from '@/components/walk/StressCheckIn.vue'
 import NearbyAreas from '@/components/rewards/NearbyAreas.vue'
-import { CBD_CENTER, getZoneFacts, isWithinCbd, loadCbdZones, type ZoneFacts } from '@/constants/cbd'
+import SproutWardrobe from '@/components/rewards/SproutWardrobe.vue'
+import { SKIN_COST } from '@/data/sproutSkins'
+import { MELBOURNE_CENTER, getZoneFacts, loadAllZones, type ZoneFacts } from '@/constants/zones'
 import { getApprovedMessages, type PublicMessage } from '@/services/care.service'
 import { decodePolyline } from '@/services/polyline'
-import { canopyFriendProgress, visitNumber } from '@/services/rewards.logic'
+import { visitNumber } from '@/services/rewards.logic'
 import {
   ALMOST_RADIUS_M,
   ARRIVAL_RADIUS_M,
-  OFF_ROUTE_M,
+  FAR_FROM_ROUTE_M,
   TURN_ALERT_M,
   WEAK_GPS_ACCURACY_M,
   distanceM,
@@ -70,12 +73,15 @@ const sprout = useSproutStore()
 const rewards = useRewardsStore()
 
 const phase = ref<Phase>('intro')
+const panelElement = ref<HTMLElement | null>(null)
+const mobileMapOpen = ref(false)
+const afterArrival = computed(() => !['intro', 'walking'].includes(phase.value))
 /** searching: no fix yet. lost: signal dropped, still watching. denied: permission refused, for good. */
 const gps = ref<'off' | 'searching' | 'on' | 'weak' | 'lost' | 'denied'>('off')
-/** A simulated walk along the route, for demos away from the CBD. */
+/** A simulated walk along the route, for demos far from the actual destination. */
 const demoMode = ref(false)
-/** The real position is outside the CBD, so it cannot sit on this route. */
-const outsideCbd = ref(false)
+/** The real position is too far from this route to track live. */
+const farFromRoute = ref(false)
 let demoTimer: ReturnType<typeof setInterval> | undefined
 let demoMetres = 0
 const position = ref<Coordinates | null>(null)
@@ -86,7 +92,6 @@ const worse = ref(false)
 const helpOpen = ref(false)
 const clock = ref(Date.now())
 const zones = ref<TreeZone[]>([])
-const cbdOutline = ref<Coordinates[]>([])
 const tips = ref<{ id: number; kind: TipKind; text: string }[]>([])
 const rerouteOpen = ref(false)
 const rerouteDeclined = ref(false)
@@ -97,8 +102,6 @@ const sproutFaceOverride = ref<'concerned' | 'grateful' | 'excited' | 'calm' | n
 const summaryText = ref('')
 const summaryDuplicate = ref(false)
 const summaryAwarded = ref(0)
-const summaryVisitNumber = ref(1)
-const summaryFriend = ref<ReturnType<typeof canopyFriendProgress> | null>(null)
 
 // Not reactive on purpose: these only drive timing decisions.
 const shownKeys = new Set<string>()
@@ -129,8 +132,20 @@ const walkStepIndex = computed(() => {
   return 0
 })
 
+watch([phase, pinStage], async () => {
+  mobileMapOpen.value = false
+  await nextTick()
+  if (panelElement.value) panelElement.value.scrollTop = 0
+  panelElement.value?.focus({ preventScroll: true })
+  if (window.matchMedia?.('(max-width: 800px)').matches) {
+    panelElement.value?.scrollIntoView?.({ block: 'start' })
+  }
+})
+
 const zoneId = computed(() => journey.destination?.id ?? null)
-const destinationZone = computed<TreeZone | null>(() => zones.value.find((zone) => zone.id === zoneId.value) ?? null)
+const destinationZone = computed<TreeZone | null>(
+  () => zones.value.find((zone) => zone.id === zoneId.value) ?? null,
+)
 /** Real tree count and top species for the destination, from GET /api/zones/{id}/facts. */
 const destinationFacts = ref<ZoneFacts | null>(null)
 
@@ -138,11 +153,9 @@ const destinationFacts = ref<ZoneFacts | null>(null)
  * The route actually being walked, normalised from whichever endpoint grew it.
  *
  * Sprout's own "grow a route" and "reroute from here" always call
- * POST /api/sprout/route, which picks the destination itself - that's
- * `journey.sproutRoute`. Choosing one specific area from "Find more trees
- * near you" needs an explicit destination, which only the older
- * POST /api/routes supports (`journey.route`); chooseArea() clears
- * `sproutRoute` when it does this, so this always prefers the current one.
+ * POST /api/sprout/route. Recommended areas use destinationZoneId on that
+ * same citywide endpoint. Legacy sessions may still have a /api/routes
+ * result, so prefer the Sprout route whenever one is available.
  */
 const activeRoute = computed(() => {
   const sproutRoute = journey.sproutRoute
@@ -161,7 +174,7 @@ const activeRoute = computed(() => {
     return {
       durationMinutes: legacy.durationMinutes,
       distanceKm: legacy.distanceKm,
-      denseZoneShare: legacy.metrics?.canopy != null ? legacy.metrics.canopy / 100 : null,
+      denseZoneShare: legacy.denseZoneShare ?? null,
       destinationTreeCount: destinationZone.value?.treeCount ?? null,
       summaryChips: journey.summary,
       path: legacy.path && legacy.path.length > 1 ? legacy.path : [],
@@ -174,12 +187,11 @@ const activeRoute = computed(() => {
 const path = computed<Coordinates[]>(() => {
   const points = activeRoute.value?.path
   if (points && points.length > 1) return points
-  if (journey.startLocation && journey.destination) {
-    return [journey.startLocation.coordinates, journey.destination.coordinates]
-  }
   return []
 })
-const totalM = computed(() => (path.value.length > 1 ? progressAlong(path.value, path.value[0]!).totalM : 0))
+const totalM = computed(() =>
+  path.value.length > 1 ? progressAlong(path.value, path.value[0]!).totalM : 0,
+)
 
 const liveProgress = computed<WalkProgress | null>(() => {
   if (gps.value !== 'on' || !position.value || path.value.length < 2) return null
@@ -203,10 +215,12 @@ const progress = computed(() => {
     remainingM: Math.max(0, totalM.value - walked),
     offRouteM: 0,
     segmentIndex: 0,
-    snapped: path.value[0] ?? CBD_CENTER,
+    snapped: path.value[0] ?? MELBOURNE_CENTER,
   } satisfies WalkProgress
 })
-const percent = computed(() => (totalM.value ? Math.round((progress.value.walkedM / totalM.value) * 100) : 0))
+const percent = computed(() =>
+  totalM.value ? Math.round((progress.value.walkedM / totalM.value) * 100) : 0,
+)
 
 const walkedPath = computed<Coordinates[]>(() => {
   if (!liveProgress.value || paused.value) return []
@@ -235,13 +249,17 @@ const messagePins = computed(() =>
   pinMessages.value.map((message) => ({
     id: message.id,
     position: { lat: message.pin.latitude, lng: message.pin.longitude },
-    label: message.body.slice(0, 60),
+    label: `${message.kind === 'damage_report' ? 'Possible tree damage: ' : ''}${message.body.slice(0, 60)}`,
+    kind: message.kind,
   })),
 )
 
 const sproutLine = computed(() => {
   if (sproutOverride.value) return sproutOverride.value
-  if (phase.value === 'intro') return hasRoute.value ? 'Ready when you are. I’ll walk beside you.' : 'Grow a route first, then we can walk it.'
+  if (phase.value === 'intro')
+    return hasRoute.value
+      ? 'Ready when you are. I’ll walk beside you.'
+      : 'Grow a route first, then we can walk it.'
   if (phase.value === 'walking') {
     if (paused.value) return PAUSE_TEXT
     if (worse.value) return WORSE_TEXT
@@ -251,6 +269,13 @@ const sproutLine = computed(() => {
   if (phase.value === 'pin') return pinSay.value
   if (phase.value === 'checkin') return 'How stressed do you feel now?'
   if (phase.value === 'ended') return END_TEXT
+  if (
+    phase.value === 'summary' &&
+    !summaryDuplicate.value &&
+    rewards.hasLockedSkins &&
+    rewards.state.points >= SKIN_COST
+  )
+    return `You have ${rewards.state.points} leaf points! Pick a new look for me.`
   return summaryText.value
 })
 
@@ -264,9 +289,8 @@ const sproutFace = computed<'happy' | 'concerned' | 'excited' | 'calm' | 'gratef
 
 async function loadZones() {
   try {
-    const cbd = await loadCbdZones()
-    zones.value = cbd.zones
-    cbdOutline.value = cbd.outline
+    const result = await loadAllZones()
+    zones.value = result.zones
   } catch {
     zones.value = []
   }
@@ -301,9 +325,13 @@ function evaluateTips(now: number) {
   if (phase.value !== 'walking' || paused.value) return
   const candidates: TipCandidate[] = []
   const live = liveProgress.value
-  const topSpecies = destinationFacts.value?.topSpecies.slice(0, 2).map((species) => species.commonName) ?? []
+  const topSpecies =
+    destinationFacts.value?.topSpecies.slice(0, 2).map((species) => species.commonName) ?? []
   const treeCount =
-    destinationFacts.value?.treeCount ?? activeRoute.value?.destinationTreeCount ?? destinationZone.value?.treeCount ?? 0
+    destinationFacts.value?.treeCount ??
+    activeRoute.value?.destinationTreeCount ??
+    destinationZone.value?.treeCount ??
+    0
 
   // Distance-based tips need GPS. Without it, the clock decides instead.
   const destination = journey.destination?.coordinates
@@ -323,7 +351,11 @@ function evaluateTips(now: number) {
     }
     const zone = zoneContaining(zones.value, position.value)
     if (zone && zone.density !== 'Low') {
-      candidates.push({ kind: 'trees', key: `trees-${zone.id}`, text: treesTip(zone.density, zone.treeCount) })
+      candidates.push({
+        kind: 'trees',
+        key: `trees-${zone.id}`,
+        text: treesTip(zone.density, zone.treeCount),
+      })
     }
   } else {
     const remainingMinutes = minutesLeft(progress.value.remainingM)
@@ -334,9 +366,11 @@ function evaluateTips(now: number) {
   if (progress.value.walkedM >= totalM.value / 2 && totalM.value > 0) {
     candidates.push({ kind: 'checkin', key: 'checkin', text: TIP_TEXT.checkin })
   }
-  // The breathe tip says the GPS is locked, so it waits for a real fix. With no GPS, it still runs.
+  // The breathe tip says the GPS is locked, so it only claims that when the
+  // fix is actually good - weak/lost/denied all show their own "tips follow
+  // the clock" note elsewhere on this screen, so the tip text must agree.
   if (gps.value !== 'searching') {
-    const locked = gps.value === 'on' || gps.value === 'weak' || gps.value === 'lost'
+    const locked = gps.value === 'on'
     candidates.push({
       kind: 'breathe',
       key: 'breathe',
@@ -361,10 +395,10 @@ function onFix(fix: GeolocationPosition) {
     evaluateTips(now)
     return
   }
-  // Outside the CBD the real dot cannot follow this route, so skip reroute prompts there.
-  outsideCbd.value = !demoMode.value && !isWithinCbd(position.value)
+  // Too far from the route for the real dot to follow it, so skip reroute prompts there.
   const live = liveProgress.value
-  if (live && !outsideCbd.value) {
+  farFromRoute.value = !demoMode.value && (!live || live.offRouteM > FAR_FROM_ROUTE_M)
+  if (live && !farFromRoute.value) {
     offRoute = nextOffRouteState(offRoute, live.offRouteM, now)
     if (offRoute.offSince === null) rerouteDeclined.value = false
     if (offRoute.shouldAsk && !rerouteDeclined.value) rerouteOpen.value = true
@@ -387,10 +421,12 @@ function onGeoError(error: GeolocationPositionError) {
   if (error.code === error.PERMISSION_DENIED) {
     gps.value = 'denied'
     stopTracking()
-    sproutOverride.value = 'No GPS here, so I’ll keep time with you instead. Tips will come by the clock.'
+    sproutOverride.value =
+      'No GPS here, so I’ll keep time with you instead. Tips will come by the clock.'
   } else {
     gps.value = 'lost'
-    sproutOverride.value = 'I lost the GPS signal for a moment. I’ll keep looking, and tips follow the clock meanwhile.'
+    sproutOverride.value =
+      'I lost the GPS signal for a moment. I’ll keep looking, and tips follow the clock meanwhile.'
   }
   evaluateTips(Date.now())
 }
@@ -416,14 +452,16 @@ function onVisibilityChange() {
 function startDemo() {
   stopTracking()
   demoMode.value = true
-  outsideCbd.value = false
+  farFromRoute.value = false
   demoMetres = 0
   gps.value = 'on'
   void keepScreenOn()
   const tick = () => {
     const point = pointAtDistance(path.value, demoMetres)
-    onFix({ coords: { latitude: point.lat, longitude: point.lng, accuracy: 5 } } as GeolocationPosition)
-    demoMetres += WALK_PACE_M_PER_MIN * DEMO_SPEED / 60
+    onFix({
+      coords: { latitude: point.lat, longitude: point.lng, accuracy: 5 },
+    } as GeolocationPosition)
+    demoMetres += (WALK_PACE_M_PER_MIN * DEMO_SPEED) / 60
     if (demoMetres > totalM.value) clearInterval(demoTimer)
   }
   demoTimer = setInterval(tick, 1_000)
@@ -539,6 +577,17 @@ async function arrive() {
   }
 }
 
+/** The next walk starts at the area just reached, including a walk without GPS. */
+function continueFromArrival() {
+  const destination = journey.destination
+  if (!destination) return
+  const coordinates =
+    !demoMode.value && gps.value === 'on' && position.value
+      ? { ...position.value }
+      : { ...destination.coordinates }
+  journey.startLocation = { id: 'last-arrival', label: destination.label, coordinates }
+}
+
 function onMessagePin(id: string) {
   openMessage.value = pinMessages.value.find((message) => message.id === id) ?? null
 }
@@ -554,9 +603,8 @@ function toCheckIn() {
 }
 
 function logVisit(after: Mood | null) {
-  if (!zoneId.value) return
+  if (phase.value !== 'checkin' || !zoneId.value) return
   const before = sprout.mood
-  const number = visitNumber(rewards.state, zoneId.value)
   const result = rewards.logVisit({
     zoneId: zoneId.value,
     label: journey.destination?.label,
@@ -565,25 +613,24 @@ function logVisit(after: Mood | null) {
   })
   summaryAwarded.value = result.awarded
   summaryDuplicate.value = result.duplicate
-  summaryVisitNumber.value = number
-  summaryFriend.value = canopyFriendProgress(rewards.state, zoneId.value, new Date())
   summaryText.value = result.duplicate
     ? 'You already logged this area today, so no extra points this time. Thanks for coming back, though.'
     : `You earned ${result.awarded} leaf points! Visit new tree-dense areas to unlock new looks for me.`
+  continueFromArrival()
   phase.value = 'summary'
   sproutFaceOverride.value = 'excited'
 }
 
 async function chooseArea(area: AreaOption) {
-  journey.destination = {
-    id: area.destination.zoneId,
-    label: area.destination.label,
-    coordinates: area.destination.center,
-  }
-  // The user picked this exact area, so the backend-chosen route from Sprout's
-  // own grow/reroute calls no longer applies - /api/routes takes a destination.
-  journey.sproutRoute = null
-  await journey.calculate('WALK')
+  if (!(await journey.growSproutRoute(area.destination.zoneId))) return
+  stopTracking()
+  gps.value = 'off'
+  demoMode.value = false
+  position.value = null
+  accuracy.value = null
+  frozen.value = null
+  farFromRoute.value = false
+  sproutOverride.value = null
   destinationFacts.value = null
   phase.value = 'intro'
   summaryText.value = ''
@@ -622,12 +669,15 @@ onBeforeUnmount(() => {
   document.removeEventListener('visibilitychange', onVisibilityChange)
 })
 
-const arrivalCenter = computed(() => journey.destination?.coordinates ?? CBD_CENTER)
+const arrivalCenter = computed(() => journey.destination?.coordinates ?? MELBOURNE_CENTER)
 const mapCenterAuto = computed(() => phase.value === 'grounding')
 </script>
 
 <template>
-  <div class="walk-page">
+  <div
+    class="walk-page"
+    :class="{ 'after-arrival': afterArrival, 'mobile-map-open': mobileMapOpen }"
+  >
     <header class="walk-header">
       <nav class="walk-steps" aria-label="Walk steps">
         <span
@@ -635,15 +685,26 @@ const mapCenterAuto = computed(() => phase.value === 'grounding')
           :key="item"
           class="walk-step"
           :class="{ done: index < walkStepIndex, active: index === walkStepIndex }"
+          :aria-current="index === walkStepIndex ? 'step' : undefined"
+          :aria-label="`${item}${index < walkStepIndex ? ', completed' : ''}`"
         >
           <span class="walk-dot">
             <template v-if="index < walkStepIndex">✓</template>
             <template v-else>{{ index + 1 }}</template>
           </span>
-          {{ item }}
+          <span class="step-name">{{ item }}</span>
         </span>
       </nav>
-      <span class="live-label" :class="gps">{{ gpsLabel }}</span>
+      <span v-if="!afterArrival" class="live-label" :class="gps">{{ gpsLabel }}</span>
+      <button
+        v-if="afterArrival"
+        type="button"
+        class="mobile-map-toggle"
+        :aria-expanded="mobileMapOpen"
+        @click="mobileMapOpen = !mobileMapOpen"
+      >
+        <ElIcon><LocationIcon /></ElIcon> {{ mobileMapOpen ? 'Hide map' : 'Show map' }}
+      </button>
       <div class="help-wrap">
         <button
           type="button"
@@ -655,13 +716,17 @@ const mapCenterAuto = computed(() => phase.value === 'grounding')
         </button>
         <div v-if="helpOpen" class="help-panel" role="note">
           <p>{{ HELP_TEXT }}</p>
-          <p>If things feel heavy, talk to someone. {{ BEYOND_BLUE.label }}: <strong>{{ BEYOND_BLUE.number }}</strong></p>
+          <p>
+            If things feel heavy, talk to someone. {{ BEYOND_BLUE.label }}:
+            <strong>{{ BEYOND_BLUE.number }}</strong>
+          </p>
         </div>
       </div>
       <RouterLink class="text-button" to="/">Back to Sprout</RouterLink>
     </header>
 
     <div v-if="!hasRoute" class="empty-state">
+      <p v-if="journey.error" role="alert">{{ journey.error }}</p>
       <p>Grow a route with Sprout first, then you can start the walk here.</p>
       <RouterLink class="primary-button" to="/">Go to Sprout</RouterLink>
     </div>
@@ -670,7 +735,7 @@ const mapCenterAuto = computed(() => phase.value === 'grounding')
       <section class="map-column" aria-label="Walk map">
         <div class="walk-map">
           <GoogleMapCanvas
-            :center="mapCenterAuto ? arrivalCenter : CBD_CENTER"
+            :center="mapCenterAuto ? arrivalCenter : MELBOURNE_CENTER"
             :trees="[]"
             :zones="zones"
             :directions-open="false"
@@ -681,13 +746,21 @@ const mapCenterAuto = computed(() => phase.value === 'grounding')
             :remaining-path="remainingPath"
             :user-position="gps === 'on' ? position : null"
             :message-pins="messagePins"
-            :cbd-outline="cbdOutline"
             :auto-center="mapCenterAuto"
             @select-message="onMessagePin"
           />
           <div class="live-card">
-            <span class="eyebrow">LIVE GPS</span>
-            <strong>{{ journey.startLocation?.label }} → {{ journey.destination?.label }}</strong>
+            <span class="eyebrow">{{
+              phase === 'summary'
+                ? 'YOUR NEXT WALK STARTS HERE'
+                : gps === 'on'
+                  ? 'LIVE GPS'
+                  : 'WALK MAP'
+            }}</span>
+            <strong v-if="phase === 'summary'">{{ journey.startLocation?.label }}</strong>
+            <strong v-else
+              >{{ journey.startLocation?.label }} → {{ journey.destination?.label }}</strong
+            >
           </div>
           <div class="walk-legend" aria-label="Map legend">
             <span><i class="swatch high" />High</span>
@@ -698,10 +771,15 @@ const mapCenterAuto = computed(() => phase.value === 'grounding')
         </div>
       </section>
 
-      <section class="panel">
+      <section
+        ref="panelElement"
+        class="panel"
+        :aria-label="`Your walk: ${WALK_STEPS[walkStepIndex]}`"
+        tabindex="-1"
+      >
         <!-- Sprout, always in view at the top of the panel, as in the prototype -->
         <div class="panel-head">
-          <SproutTree :size="96" :face="sproutFace" :canopy="null" />
+          <SproutTree :size="64" :face="sproutFace" :canopy="null" />
           <div class="bubble" role="status">
             <span class="eyebrow">SPROUT SAYS</span>
             <p>{{ sproutLine }}</p>
@@ -715,26 +793,35 @@ const mapCenterAuto = computed(() => phase.value === 'grounding')
             <h2>Walking to {{ journey.destination?.label }}</h2>
             <p class="from">From {{ journey.startLocation?.label }}</p>
             <div class="facts">
-              <div class="fact"><span>Walk time</span><strong>{{ activeRoute?.durationMinutes }} min</strong></div>
-              <div class="fact"><span>Distance</span><strong>{{ activeRoute?.distanceKm.toFixed(1) }} km</strong></div>
+              <div class="fact">
+                <span>Walk time</span><strong>{{ activeRoute?.durationMinutes }} min</strong>
+              </div>
+              <div class="fact">
+                <span>Distance</span><strong>{{ activeRoute?.distanceKm.toFixed(1) }} km</strong>
+              </div>
               <div v-if="activeRoute?.destinationTreeCount != null" class="fact">
                 <span>Area trees</span><strong>{{ activeRoute.destinationTreeCount }}</strong>
               </div>
               <div v-if="activeRoute?.denseZoneShare != null" class="fact">
-                <span>Tree-dense share</span><strong>{{ Math.round(activeRoute.denseZoneShare * 100) }}%</strong>
+                <span>Tree-dense share</span
+                ><strong>{{ Math.round(activeRoute.denseZoneShare * 100) }}%</strong>
               </div>
             </div>
             <div v-if="activeRoute?.summaryChips.length" class="chips">
-              <span v-for="chip in activeRoute.summaryChips" :key="chip" class="chip">{{ chip }}</span>
+              <span v-for="chip in activeRoute.summaryChips" :key="chip" class="chip">{{
+                chip
+              }}</span>
             </div>
           </article>
           <p class="reason">{{ LOCATION_REASON }}</p>
-          <div class="row">
+          <div class="row start-actions">
             <button type="button" class="primary-button" @click="beginWalk('gps')">
               <ElIcon><LocationIcon /></ElIcon> Start walk
             </button>
             <button type="button" class="ghost-button" @click="beginWalk('demo')">Demo walk</button>
-            <button type="button" class="ghost-button" @click="beginWalk('none')">Walk without GPS</button>
+            <button type="button" class="ghost-button" @click="beginWalk('none')">
+              Walk without GPS
+            </button>
           </div>
         </template>
 
@@ -746,32 +833,51 @@ const mapCenterAuto = computed(() => phase.value === 'grounding')
             <p class="from">
               From {{ journey.startLocation?.label }} · {{ activeRoute?.durationMinutes }} min ·
               {{ activeRoute?.distanceKm.toFixed(1) }} km
-              <template v-if="activeRoute?.destinationTreeCount != null"> · {{ activeRoute.destinationTreeCount }} trees</template>
+              <template v-if="activeRoute?.destinationTreeCount != null">
+                · {{ activeRoute.destinationTreeCount }} trees</template
+              >
             </p>
           </div>
           <div v-if="activeRoute?.summaryChips.length" class="chips">
-            <span v-for="chip in activeRoute.summaryChips" :key="chip" class="chip">{{ chip }}</span>
+            <span v-for="chip in activeRoute.summaryChips" :key="chip" class="chip">{{
+              chip
+            }}</span>
           </div>
           <div class="progress-block">
             <div class="progress-head">
               <strong>{{ percent }}% of the route</strong>
-              <span class="muted">{{ formatDistance(progress.remainingM) }} left · {{ minutesLeft(progress.remainingM) }} min</span>
+              <span class="muted"
+                >{{ formatDistance(progress.remainingM) }} left ·
+                {{ minutesLeft(progress.remainingM) }} min</span
+              >
             </div>
-            <div class="bar" role="progressbar" :aria-valuenow="percent" aria-valuemin="0" aria-valuemax="100">
+            <div
+              class="bar"
+              role="progressbar"
+              :aria-valuenow="percent"
+              aria-valuemin="0"
+              aria-valuemax="100"
+            >
               <div class="bar-fill" :style="{ width: `${percent}%` }" />
             </div>
             <p v-if="gps === 'weak'" class="weak-note" role="status">
               <ElIcon><Warning /></ElIcon> GPS signal weak. Tips follow the clock for now.
             </p>
-            <div v-if="outsideCbd && !demoMode" class="reroute" role="status">
+            <div v-if="farFromRoute && !demoMode" class="reroute" role="status">
               <p>
-                You’re outside the CBD, so your live dot can’t sit on this route. Try the demo walk to see the full flow.
+                Your live location is too far from this route to track. Try the demo walk to see the
+                full flow.
               </p>
-              <button type="button" class="primary-button" @click="switchToDemo">Switch to demo walk</button>
+              <button type="button" class="primary-button" @click="switchToDemo">
+                Switch to demo walk
+              </button>
             </div>
-            <p v-if="demoMode" class="muted small">Demo walk: a simulated position moves along the route at {{ DEMO_SPEED }}× speed.</p>
+            <p v-if="demoMode" class="muted small">
+              Demo walk: a simulated position moves along the route at {{ DEMO_SPEED }}× speed.
+            </p>
             <p v-if="gps === 'lost'" class="weak-note" role="status">
-              <ElIcon><Warning /></ElIcon> GPS signal lost. I’m still looking; tips follow the clock.
+              <ElIcon><Warning /></ElIcon> GPS signal lost. I’m still looking; tips follow the
+              clock.
             </p>
             <p v-if="gps === 'denied'" class="muted small">
               No GPS mode. Your route is shown and tips come by time.
@@ -792,7 +898,9 @@ const mapCenterAuto = computed(() => phase.value === 'grounding')
               <button type="button" class="ghost-button" @click="togglePause">
                 {{ paused ? 'Keep walking' : 'I need a break' }}
               </button>
-              <button type="button" class="ghost-button" @click="feelingWorse">I’m feeling worse</button>
+              <button type="button" class="ghost-button" @click="feelingWorse">
+                I’m feeling worse
+              </button>
             </div>
             <button type="button" class="text-button danger" @click="endWalk">End walk</button>
           </div>
@@ -800,8 +908,10 @@ const mapCenterAuto = computed(() => phase.value === 'grounding')
           <div v-if="tips.length" class="tips">
             <span class="eyebrow">SPROUT’S LIVE TIPS</span>
             <ul>
-              <li v-for="tip in tips" :key="tip.id">
-                <span class="tag">{{ tip.kind.toUpperCase() === 'CHECKIN' ? 'CHECK IN' : tip.kind.toUpperCase() }}</span>
+              <li v-for="tip in tips.slice(0, 3)" :key="tip.id">
+                <span class="tag">{{
+                  tip.kind.toUpperCase() === 'CHECKIN' ? 'CHECK IN' : tip.kind.toUpperCase()
+                }}</span>
                 {{ tip.text }}
               </li>
             </ul>
@@ -812,7 +922,8 @@ const mapCenterAuto = computed(() => phase.value === 'grounding')
         <template v-else-if="phase === 'grounding'">
           <p class="reached">You’ve reached your tree-dense area</p>
           <p v-if="rewards.state.visits.some((v) => v.zoneId === zoneId)" class="came-back">
-            You came back! This is visit {{ visitNumber(rewards.state, zoneId ?? '') }} to this area.
+            You came back! This is visit {{ visitNumber(rewards.state, zoneId ?? '') }} to this
+            area.
           </p>
           <article class="here">
             <span class="eyebrow">YOU’RE HERE</span>
@@ -826,10 +937,24 @@ const mapCenterAuto = computed(() => phase.value === 'grounding')
             <span class="eyebrow">MESSAGES FROM OTHER VISITORS</span>
             <ul>
               <li v-for="message in pinMessages" :key="message.id">
-                <button type="button" class="text-button" @click="onMessagePin(message.id)">{{ message.body.slice(0, 50) }}</button>
+                <button type="button" class="text-button" @click="onMessagePin(message.id)">
+                  {{ message.kind === 'damage_report' ? '⚑ Possible tree damage · ' : ''
+                  }}{{ message.body.slice(0, 50) }}
+                </button>
               </li>
             </ul>
-            <p v-if="openMessage" class="open-message">{{ openMessage.body }}</p>
+            <article v-if="openMessage" class="open-message">
+              <strong v-if="openMessage.kind === 'damage_report'"
+                >Visitor reported possible tree damage</strong
+              >
+              <p>{{ openMessage.body }}</p>
+              <img
+                v-if="openMessage.photoDataUrl"
+                :src="openMessage.photoDataUrl"
+                alt="Visitor’s photo of the pinned tree"
+                style="max-width: 100%; border-radius: 12px"
+              />
+            </article>
           </div>
         </template>
 
@@ -851,17 +976,40 @@ const mapCenterAuto = computed(() => phase.value === 'grounding')
         </template>
 
         <template v-else-if="phase === 'summary'">
-          <article class="summary">
-            <span class="eyebrow">{{ summaryDuplicate ? 'ALREADY LOGGED TODAY' : 'WALK COMPLETE' }}</span>
-            <h2 v-if="!summaryDuplicate">+{{ summaryAwarded }} leaf points</h2>
-            <p class="muted">New total: {{ rewards.state.points }} leaf points</p>
-            <p v-if="summaryVisitNumber === 1 && !summaryDuplicate" class="badge">
-              You helped care for this area. Visit {{ summaryFriend?.visitsNeeded }} more times this week to become a Canopy Friend.
+          <article class="summary completion-card">
+            <div class="completion-heading">
+              <span class="completion-leaf"><LeafPointsIcon /></span>
+              <div>
+                <span class="eyebrow">{{
+                  summaryDuplicate ? 'ALREADY LOGGED TODAY' : 'WALK COMPLETE'
+                }}</span>
+                <h2 v-if="!summaryDuplicate">+{{ summaryAwarded }} leaf points</h2>
+              </div>
+              <strong class="completion-total" aria-label="Available leaf points">{{
+                rewards.state.points
+              }}</strong>
+            </div>
+            <div class="completion-progress" :aria-label="`${rewards.state.points} leaf points`">
+              <span
+                :style="{ width: `${Math.min(100, (rewards.state.points / SKIN_COST) * 100)}%` }"
+              />
+            </div>
+            <p>
+              {{
+                !rewards.hasLockedSkins
+                  ? 'Every Sprout look is yours. Keep enjoying your walks!'
+                  : rewards.state.points >= SKIN_COST
+                    ? 'You can unlock a new Sprout skin!'
+                    : `${SKIN_COST - rewards.state.points} more points to unlock a new look.`
+              }}
             </p>
-            <p v-if="summaryFriend?.earned" class="badge friend">Canopy Friend</p>
-            <p class="muted small">Points and visits are saved on this device only. No account needed.</p>
           </article>
+          <SproutWardrobe compact />
           <NearbyAreas @pick="chooseArea" />
+          <p v-if="journey.sproutRouteLoading" class="muted" role="status">
+            Growing your next route…
+          </p>
+          <p v-if="journey.sproutRouteError" role="alert">{{ journey.sproutRouteError }}</p>
           <button type="button" class="primary-button" @click="visitAnother">Done</button>
         </template>
 
@@ -874,485 +1022,8 @@ const mapCenterAuto = computed(() => phase.value === 'grounding')
         </template>
       </section>
     </div>
-
   </div>
 </template>
 
-<style scoped>
-.walk-page {
-  --sp-serif: 'Fraunces', Georgia, serif;
-  /* #app has no fixed height, so percentages would collapse: fill the viewport. */
-  min-height: 100vh;
-  display: flex;
-  flex-direction: column;
-  font-family: 'Figtree', system-ui, sans-serif;
-  background: #f5f2e8;
-  color: #1d2a1d;
-}
-.walk-steps {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-  align-items: center;
-  flex: 1;
-}
-.walk-step {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 0.8rem;
-  font-weight: 600;
-  color: #7a8478;
-  padding: 5px 10px 5px 5px;
-  border-radius: 999px;
-}
-.walk-step.done {
-  color: #1d2a1d;
-}
-.walk-step.active {
-  background: #1f5a2c;
-  color: white;
-}
-.walk-dot {
-  display: grid;
-  place-items: center;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  background: #ece8da;
-  font-size: 0.7rem;
-  font-weight: 700;
-}
-.walk-step.done .walk-dot {
-  background: #1f5a2c;
-  color: white;
-}
-.walk-step.active .walk-dot {
-  background: white;
-  color: #1f5a2c;
-}
-.live-card {
-  position: absolute;
-  left: 16px;
-  top: 14px;
-  z-index: 2;
-  background: white;
-  border-radius: 14px;
-  padding: 10px 14px;
-  box-shadow: 0 6px 18px #1d2a1d1f;
-  max-width: 70%;
-  font-size: 0.86rem;
-}
-.live-card strong {
-  display: block;
-  margin-top: 2px;
-}
-.walk-legend {
-  position: absolute;
-  left: 16px;
-  bottom: 16px;
-  z-index: 2;
-  display: flex;
-  gap: 12px;
-  align-items: center;
-  background: white;
-  border-radius: 12px;
-  padding: 8px 12px;
-  box-shadow: 0 6px 18px #1d2a1d1f;
-  font-size: 0.74rem;
-}
-.walk-legend span {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-}
-.walk-legend .swatch {
-  width: 12px;
-  height: 12px;
-  border-radius: 3px;
-  display: inline-block;
-}
-.walk-legend .swatch.high {
-  background: #006d2c;
-}
-.walk-legend .swatch.medium {
-  background: #31a354;
-}
-.walk-legend .swatch.low {
-  background: #a1d99b;
-}
-.you-dot {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  background: #1a73e8;
-  display: inline-block;
-}
-.panel-head {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  background: #eef3e6;
-  border-radius: 18px;
-  padding: 12px 16px;
-  margin: -20px -28px 4px;
-}
-.here {
-  background: white;
-  border: 1px solid #e0dbcb;
-  border-radius: 14px;
-  padding: 10px 14px;
-  display: grid;
-  gap: 2px;
-}
-.walking-to h2 {
-  font-family: var(--sp-serif, Georgia, serif);
-  font-size: 1.5rem;
-  margin: 2px 0 4px;
-}
-.walking-to .from {
-  margin: 0;
-  font-size: 0.86rem;
-  color: #6b766a;
-}
-.controls .wide {
-  width: 100%;
-}
-.walk-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 16px;
-  padding: 12px 24px;
-  background: white;
-  border-bottom: 1px solid var(--tg-border);
-}
-.live-label {
-  margin-right: 16px;
-  font-size: 0.72rem;
-  font-weight: 800;
-  letter-spacing: 0.12em;
-  color: var(--tg-green-800);
-}
-.live-label.denied,
-.live-label.weak {
-  color: #8a4a12;
-}
-.walk-layout {
-  flex: 1;
-  display: grid;
-  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
-  min-height: 0;
-}
-.panel {
-  min-height: 0;
-}
-.map-column {
-  display: flex;
-  flex-direction: column;
-  padding: 20px 24px;
-  gap: 14px;
-  min-height: 0;
-}
-.walk-map {
-  position: relative;
-  flex: 1;
-  min-height: 420px;
-  border-radius: 16px;
-  overflow: hidden;
-  border: 1px solid var(--tg-border);
-}
-.sprout-row {
-  display: flex;
-  gap: 16px;
-  align-items: flex-end;
-}
-.bubble {
-  background: white;
-  border: 1.5px solid var(--tg-green-100);
-  border-radius: 18px;
-  padding: 12px 16px;
-  max-width: 420px;
-}
-.bubble p {
-  margin: 4px 0 0;
-  font-size: 0.92rem;
-  line-height: 1.45;
-  color: var(--tg-green-950);
-}
-.panel {
-  padding: 20px 28px;
-  overflow-y: auto;
-  display: grid;
-  gap: 16px;
-  align-content: start;
-}
-.eyebrow {
-  font-size: 0.68rem;
-  font-weight: 800;
-  letter-spacing: 0.12em;
-  color: var(--tg-green-700);
-}
-h2 {
-  margin: 4px 0;
-  font-size: 1.15rem;
-}
-.route-card {
-  background: white;
-  border: 1px solid var(--tg-border);
-  border-radius: 16px;
-  padding: 16px;
-}
-.from,
-.muted {
-  margin: 0;
-  color: var(--tg-muted);
-  font-size: 0.86rem;
-}
-.small {
-  font-size: 0.78rem;
-}
-.facts {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-  margin-top: 12px;
-}
-.fact {
-  flex: 1;
-  min-width: 110px;
-  border: 1px solid var(--tg-border);
-  border-radius: 12px;
-  padding: 10px 12px;
-}
-.fact span {
-  display: block;
-  font-size: 0.7rem;
-  font-weight: 700;
-  color: var(--tg-muted);
-}
-.chips {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin-top: 12px;
-}
-.chip,
-.tag {
-  font-size: 0.72rem;
-  font-weight: 700;
-  border-radius: 999px;
-  padding: 4px 10px;
-  background: var(--tg-green-100);
-  color: var(--tg-green-900);
-}
-.tag {
-  border-radius: 6px;
-  letter-spacing: 0.06em;
-  margin-right: 6px;
-}
-.reason {
-  font-size: 0.82rem;
-  color: var(--tg-muted);
-  margin: 0;
-}
-.row,
-.controls {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-  align-items: center;
-}
-.progress-block {
-  display: grid;
-  gap: 8px;
-}
-.progress-head {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-.bar {
-  height: 10px;
-  border-radius: 999px;
-  background: var(--tg-green-50);
-  overflow: hidden;
-}
-.bar-fill {
-  height: 100%;
-  background: var(--tg-green-700);
-  transition: width 400ms ease;
-}
-.weak-note {
-  margin: 0;
-  color: #8a4a12;
-  font-size: 0.84rem;
-  display: flex;
-  gap: 6px;
-  align-items: center;
-}
-.reroute {
-  border-radius: 12px;
-  padding: 12px 14px;
-  font-size: 0.9rem;
-  border: 1.5px solid #e9b98a;
-  background: #fff6ec;
-}
-.reroute p {
-  margin: 0 0 8px;
-}
-.help-wrap {
-  position: relative;
-}
-.help-button {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  border: none;
-  background: none;
-  padding: 0;
-  font-size: 0.84rem;
-  font-weight: 700;
-  color: var(--tg-green-700);
-  cursor: pointer;
-}
-.help-panel {
-  position: absolute;
-  right: 0;
-  top: calc(100% + 8px);
-  z-index: 5;
-  width: 260px;
-  border-radius: 12px;
-  padding: 12px 14px;
-  font-size: 0.86rem;
-  background: #eef4fb;
-  box-shadow: 0 10px 24px #1d2a1d26;
-}
-.help-panel p {
-  margin: 0 0 8px;
-}
-.help-panel p:last-child {
-  margin-bottom: 0;
-}
-.tips ul,
-.messages ul {
-  list-style: none;
-  margin: 6px 0 0;
-  padding: 0;
-  display: grid;
-  gap: 8px;
-}
-.tips li {
-  font-size: 0.88rem;
-  line-height: 1.45;
-}
-.reached {
-  margin: 0;
-  font-weight: 800;
-  font-size: 1rem;
-  color: var(--tg-green-900);
-}
-.came-back,
-.badge {
-  margin: 0;
-  font-size: 0.9rem;
-  color: var(--tg-green-900);
-}
-.badge.friend {
-  display: inline-block;
-  font-weight: 800;
-  background: var(--tg-green-100);
-  border-radius: 999px;
-  padding: 4px 12px;
-  width: fit-content;
-  animation: pop 500ms ease-out;
-}
-@keyframes pop {
-  0% {
-    transform: scale(0.6);
-    opacity: 0;
-  }
-  70% {
-    transform: scale(1.08);
-    opacity: 1;
-  }
-  100% {
-    transform: scale(1);
-  }
-}
-.open-message {
-  background: #fff7e6;
-  border-radius: 12px;
-  padding: 10px 12px;
-  margin: 8px 0 0;
-  font-size: 0.9rem;
-}
-.summary {
-  background: white;
-  border: 1px solid var(--tg-border);
-  border-radius: 16px;
-  padding: 16px;
-  display: grid;
-  gap: 6px;
-}
-.empty-state {
-  margin: 48px auto;
-  text-align: center;
-  display: grid;
-  gap: 12px;
-  justify-items: center;
-}
-.primary-button,
-.ghost-button {
-  border-radius: 999px;
-  padding: 12px 20px;
-  font-weight: 700;
-  font-size: 0.88rem;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  justify-content: center;
-  text-decoration: none;
-}
-.primary-button {
-  background: var(--tg-green-800);
-  color: white;
-  border: none;
-}
-.ghost-button {
-  background: white;
-  color: var(--tg-green-800);
-  border: 1.5px solid var(--tg-green-800);
-}
-.text-button {
-  background: none;
-  border: none;
-  color: var(--tg-green-700);
-  font-weight: 700;
-  font-size: 0.84rem;
-  cursor: pointer;
-  text-decoration: none;
-}
-.text-button.danger {
-  color: #b44235;
-}
-@media (max-width: 800px) {
-  .walk-layout {
-    grid-template-columns: 1fr;
-  }
-  .walk-map {
-    flex: none;
-    height: 280px;
-    min-height: 0;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .bar-fill,
-  .badge.friend {
-    transition: none;
-    animation: none;
-  }
-}
-</style>
+<style src="../styles/walk-shell.css" scoped></style>
+<style src="../styles/walk-controls.css"></style>

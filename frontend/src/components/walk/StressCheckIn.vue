@@ -12,7 +12,9 @@ const props = defineProps<{ before: Mood | null }>()
 const emit = defineEmits<{ log: [after: Mood | null] }>()
 
 const now = ref<Mood | null>(null)
-const beforeOption = computed(() => MOOD_OPTIONS.find((option) => option.value === props.before) ?? null)
+const beforeOption = computed(
+  () => MOOD_OPTIONS.find((option) => option.value === props.before) ?? null,
+)
 const nowOption = computed(() => MOOD_OPTIONS.find((option) => option.value === now.value) ?? null)
 const change = computed(() =>
   props.before && now.value ? moodChangeSummary(props.before, now.value) : null,
@@ -22,7 +24,7 @@ const reply = computed(() => {
   if (beforeOption.value) {
     return `Before your walk you said you felt ${beforeOption.value.label.toLowerCase()}. How about now?`
   }
-  return 'How stressed do you feel now?'
+  return 'Take a moment to notice how you feel. There is no right answer.'
 })
 
 function log() {
@@ -52,7 +54,13 @@ function skip() {
           <circle cx="20" cy="20" r="18" :fill="option.color" />
           <circle cx="14" cy="17" r="2.2" fill="#2b2118" />
           <circle cx="26" cy="17" r="2.2" fill="#2b2118" />
-          <path :d="option.mouth" stroke="#2b2118" stroke-width="2.4" fill="none" stroke-linecap="round" />
+          <path
+            :d="option.mouth"
+            stroke="#2b2118"
+            stroke-width="2.4"
+            fill="none"
+            stroke-linecap="round"
+          />
         </svg>
         <span>{{ option.label }}</span>
       </button>
@@ -88,6 +96,8 @@ function skip() {
 .check-in {
   display: grid;
   gap: 14px;
+  min-width: 0;
+  container-type: inline-size;
 }
 .sprout-line {
   margin: 0;
@@ -117,6 +127,32 @@ h3 {
   font-weight: 650;
   cursor: pointer;
   text-align: center;
+  min-width: 0;
+  min-height: 104px;
+  color: var(--tg-green-950);
+  font-family: inherit;
+  line-height: 1.35;
+}
+.mood-option svg {
+  flex-shrink: 0;
+}
+.mood-option span {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+@container (max-width: 420px) {
+  .mood-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+@container (max-width: 280px) {
+  .mood-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+.mood-option:focus-visible {
+  outline: 3px solid var(--tg-green-700);
+  outline-offset: 3px;
 }
 .mood-option.selected {
   border-color: var(--tg-green-700);

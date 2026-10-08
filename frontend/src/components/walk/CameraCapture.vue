@@ -10,8 +10,9 @@ import { photoFromFile, photoFromVideo } from '@/services/photo'
  */
 const emit = defineEmits<{
   captured: [dataUrl: string]
-  cancel: []
+  cancel: [skipPhoto: boolean]
 }>()
+defineProps<{ saving?: boolean }>()
 
 const video = ref<HTMLVideoElement | null>(null)
 const blocked = ref(false)
@@ -72,7 +73,7 @@ async function pickFromPhotos(event: Event) {
 
 function cancel() {
   stopCamera()
-  emit('cancel')
+  emit('cancel', blocked.value)
 }
 
 onMounted(startCamera)
@@ -91,14 +92,30 @@ onBeforeUnmount(stopCamera)
     <p v-if="error" class="form-error" role="alert">{{ error }}</p>
 
     <div class="camera-actions">
-      <button v-if="!blocked" type="button" class="shutter" :disabled="working" aria-label="Take photo" @click="takePhoto">
+      <button
+        v-if="!blocked"
+        type="button"
+        class="shutter"
+        :disabled="working || saving"
+        aria-label="Take photo"
+        @click="takePhoto"
+      >
         <ElIcon><Camera /></ElIcon>
       </button>
       <label class="ghost-button photos-button">
         <ElIcon><Picture /></ElIcon> Photos
-        <input type="file" accept="image/*" class="visually-hidden" @change="pickFromPhotos" />
+        <input
+          type="file"
+          accept="image/*"
+          class="visually-hidden"
+          :disabled="working || saving"
+          aria-label="Choose a tree photo"
+          @change="pickFromPhotos"
+        />
       </label>
-      <button type="button" class="text-button" @click="cancel">{{ blocked ? 'Continue without a photo' : 'Cancel' }}</button>
+      <button type="button" class="text-button" :disabled="saving" @click="cancel">
+        {{ blocked ? 'Continue without a photo' : 'Cancel' }}
+      </button>
     </div>
   </div>
 </template>

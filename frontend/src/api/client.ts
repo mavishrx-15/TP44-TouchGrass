@@ -51,6 +51,7 @@ interface RequestOptions {
   method?: HttpMethod
   body?: unknown
   signal?: AbortSignal
+  headers?: Record<string, string>
 }
 
 export class ApiError extends Error {
@@ -70,7 +71,7 @@ export class ApiError extends Error {
  */
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const method = options.method ?? 'GET'
-  const headers: HeadersInit = { Accept: 'application/json' }
+  const headers: HeadersInit = { Accept: 'application/json', ...options.headers }
   const token = getAccessToken()
   if (token && path !== '/api/access/verify') headers.Authorization = `Bearer ${token}`
 
@@ -108,12 +109,22 @@ export function apiGet<T>(path: string, signal?: AbortSignal): Promise<T> {
   return request<T>(path, { signal })
 }
 
-export function apiPost<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
-  return request<T>(path, { method: 'POST', body, signal })
+export function apiPost<T>(
+  path: string,
+  body: unknown,
+  signal?: AbortSignal,
+  headers?: Record<string, string>,
+): Promise<T> {
+  return request<T>(path, { method: 'POST', body, signal, headers })
 }
 
-export function apiPut<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
-  return request<T>(path, { method: 'PUT', body, signal })
+export function apiPut<T>(
+  path: string,
+  body: unknown,
+  signal?: AbortSignal,
+  headers?: Record<string, string>,
+): Promise<T> {
+  return request<T>(path, { method: 'PUT', body, signal, headers })
 }
 
 export function apiDelete<T = void>(path: string, signal?: AbortSignal): Promise<T> {

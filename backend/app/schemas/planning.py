@@ -28,6 +28,10 @@ class AreasRequest(PlanningRequest):
     limit: int = Field(default=3, ge=1, le=3)
 
 
+class RoutePlanningRequest(PlanningRequest):
+    destinationZoneId: str | None = Field(default=None, min_length=1, max_length=200)
+
+
 class Destination(BaseModel):
     zoneId: str
     label: str

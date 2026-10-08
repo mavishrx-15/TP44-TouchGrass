@@ -7,38 +7,11 @@ const router = createRouter({
   routes: [
     { path: '/access', name: 'access', component: () => import('@/views/AccessView.vue') },
     { path: '/', name: 'home', component: HomeView },
-    {
-      path: '/explore',
-      name: 'personalised-route',
-      component: () => import('@/views/PersonalisedRouteView.vue'),
-    },
-    {
-      path: '/explore/recommendations',
-      name: 'recommendations',
-      component: () => import('@/views/RecommendationsView.vue'),
-    },
-    {
-      path: '/map',
-      name: 'map',
-      component: () => import('@/views/MapView.vue'),
-    },
-    {
-      path: '/tree-explorer',
-      name: 'tree-explorer',
-      component: () => import('@/views/TreeExplorerView.vue'),
-    },
-    {
-      path: '/tree-health',
-      name: 'tree-health',
-      component: () => import('@/views/TreeHealthView.vue'),
-    },
-    {
-      path: '/identify-tree',
-      name: 'identify-tree',
-      component: () => import('@/views/IdentifyTreeView.vue'),
-    },
     { path: '/walk', name: 'walk', component: () => import('@/views/WalkView.vue') },
     { path: '/rewards', name: 'rewards', component: () => import('@/views/RewardsView.vue') },
+    // Explore and its sub-pages are gone; an old link to one lands on Home
+    // instead of a blank unmatched-route page.
+    { path: '/:pathMatch(.*)*', redirect: '/' },
   ],
   scrollBehavior() {
     return { top: 0, left: 0 }

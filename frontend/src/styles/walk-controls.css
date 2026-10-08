@@ -1,0 +1,203 @@
+.walk-page {
+  --walk-ink: #16341c;
+  --walk-muted: #6b766a;
+  --walk-line: #dfe5d3;
+  --walk-paper: #fffdf8;
+  --walk-green: #1f5a2c;
+}
+.walk-page .panel :is(.primary-button, .ghost-button, .text-button) {
+  font:
+    700 0.94rem/1.4 'Figtree',
+    system-ui,
+    sans-serif;
+  min-height: 48px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 11px 18px;
+  border-radius: 999px;
+  cursor: pointer;
+  text-align: center;
+  text-decoration: none;
+  transition:
+    background 160ms,
+    box-shadow 160ms;
+  max-width: 100%;
+  white-space: normal;
+}
+.walk-page .panel .primary-button {
+  background: var(--walk-green);
+  border: 1px solid var(--walk-green);
+  color: #fff;
+  box-shadow: 0 5px 14px #1f5a2c14;
+}
+.walk-page .panel .primary-button:hover:not(:disabled) {
+  background: #1a502d;
+}
+.walk-page .panel .ghost-button {
+  background: var(--walk-paper);
+  border: 1.5px solid var(--walk-green);
+  color: var(--walk-green);
+  box-shadow: none;
+}
+.walk-page .panel .ghost-button:hover:not(:disabled) {
+  background: #f0f5ed;
+}
+.walk-page .panel .text-button {
+  background: transparent;
+  border: 0;
+  color: #53674c;
+  padding: 8px 10px;
+  box-shadow: none;
+}
+.walk-page .panel .text-button:hover {
+  background: #eaf1e6;
+  color: var(--walk-green);
+}
+.walk-page .panel :is(button, textarea, summary, input, a):focus-visible {
+  outline: 3px solid #93b883;
+  outline-offset: 3px;
+}
+.walk-page .panel button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.walk-page .panel :is(.form-error, > [role='alert']) {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: #fff1eb;
+  border: 1px solid #f0d9cd;
+  color: #99462d;
+  font-size: 0.84rem;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+.walk-page .panel :is(h2, h3) {
+  text-wrap: balance;
+  font-weight: 700;
+}
+.walk-page .panel .ground-card {
+  background: #f1f6ea;
+  border: 1px solid var(--walk-line);
+  padding: 24px;
+  border-radius: 22px;
+  gap: 14px;
+}
+.walk-page .panel .ground-card .body {
+  color: var(--walk-muted);
+  font-size: 0.9rem;
+}
+.walk-page .panel .check-in {
+  background: var(--walk-paper);
+  border: 1px solid var(--walk-line);
+  border-radius: 22px;
+  padding: 22px;
+  gap: 18px;
+}
+.walk-page .panel .check-in h3 {
+  font-size: 1.2rem;
+  line-height: 1.35;
+}
+.walk-page .panel .check-in .sprout-line {
+  font-size: 0.88rem;
+  font-weight: 500;
+  color: var(--walk-muted);
+}
+.walk-page .panel .mood-option {
+  border-width: 2px;
+  background: #fff;
+  font-weight: 700;
+  font-size: 0.82rem;
+  padding: 14px 8px;
+  gap: 10px;
+}
+.walk-page .panel .mood-option.selected {
+  background: #f1f6ea;
+  border-color: var(--walk-green);
+}
+.walk-page .panel .compare {
+  background: #f2f6ed;
+  border: 0;
+  padding: 16px;
+  gap: 12px;
+}
+.walk-page .panel .check-in .actions {
+  flex-wrap: wrap;
+}
+.walk-page .panel .check-in .primary-button {
+  flex: 1;
+}
+.walk-page .panel .camera {
+  gap: 16px;
+}
+.walk-page .panel .camera-blocked {
+  background: #f0f4e9;
+  padding: 20px;
+  border-radius: 16px;
+  margin: 0;
+  line-height: 1.6;
+}
+.walk-page .panel .camera-actions {
+  justify-content: center;
+  gap: 12px;
+}
+.walk-page .panel .photos-button:focus-within {
+  outline: 3px solid #93b883;
+  outline-offset: 3px;
+}
+.walk-page .panel .wardrobe.compact {
+  border-color: var(--walk-line);
+  padding: 20px;
+  border-radius: 22px;
+}
+.walk-page .panel .nearby {
+  gap: 12px;
+}
+.walk-page .panel .nearby .area {
+  border: 1px solid var(--walk-line);
+  border-radius: 16px;
+  padding: 15px;
+  background: var(--walk-paper);
+  gap: 12px;
+  min-height: 76px;
+}
+.walk-page .panel .nearby .name {
+  color: var(--walk-ink);
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+.walk-page .panel .wardrobe .action {
+  border-radius: 999px;
+  min-height: 44px;
+  font-weight: 700;
+}
+.walk-page .panel .wardrobe .action:enabled {
+  background: var(--walk-green);
+}
+.walk-page .panel .nearby .meta {
+  font-size: 0.76rem;
+  line-height: 1.6;
+}
+.walk-page .panel .nearby .empty {
+  font-size: 0.82rem;
+}
+.walk-page .panel .nearby .eyebrow {
+  font-size: 0.65rem;
+}
+@media (max-width: 800px) {
+  .walk-page .panel :is(.primary-button, .ghost-button, .text-button) {
+    min-height: 48px;
+  }
+  .walk-page .panel .check-in,
+  .walk-page .panel .ground-card {
+    padding: 20px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .walk-page .panel * {
+    scroll-behavior: auto;
+    transition: none !important;
+  }
+}

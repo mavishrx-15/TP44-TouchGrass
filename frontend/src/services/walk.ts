@@ -14,6 +14,13 @@ export const OFF_ROUTE_M = 40
 export const OFF_ROUTE_SECONDS = 20
 export const WEAK_GPS_ACCURACY_M = 50
 export const ARRIVAL_RADIUS_M = 40
+/**
+ * Beyond this, the live position is nowhere near the route - not CBD-specific
+ * any more, since a destination can now be anywhere in the city. Used to
+ * suggest the demo walk instead of chasing reroute/arrival logic that will
+ * never make sense from this far away.
+ */
+export const FAR_FROM_ROUTE_M = 3000
 export const TURN_ALERT_M = 50
 export const ALMOST_RADIUS_M = 100
 export const TIP_COOLDOWN_MS = 60_000
@@ -41,8 +48,17 @@ export function compassFrom(a: Coordinates, b: Coordinates): string {
     Math.cos(rad(a.lat)) * Math.sin(rad(b.lat)) -
     Math.sin(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.cos(dLng)
   const bearing = (Math.atan2(y, x) * 180) / Math.PI
-  const points = ['north', 'north-east', 'east', 'south-east', 'south', 'south-west', 'west', 'north-west']
-  return points[Math.round((((bearing + 360) % 360) / 45)) % 8]!
+  const points = [
+    'north',
+    'north-east',
+    'east',
+    'south-east',
+    'south',
+    'south-west',
+    'west',
+    'north-west',
+  ]
+  return points[Math.round(((bearing + 360) % 360) / 45) % 8]!
 }
 
 export interface WalkProgress {
@@ -64,7 +80,14 @@ export interface WalkProgress {
  */
 export function progressAlong(path: Coordinates[], position: Coordinates): WalkProgress {
   if (path.length === 0) {
-    return { walkedM: 0, totalM: 0, remainingM: 0, offRouteM: 0, segmentIndex: 0, snapped: position }
+    return {
+      walkedM: 0,
+      totalM: 0,
+      remainingM: 0,
+      offRouteM: 0,
+      segmentIndex: 0,
+      snapped: position,
+    }
   }
   const cumulative = [0]
   for (let i = 1; i < path.length; i++) {
@@ -192,10 +215,9 @@ export function pickTip(
 }
 
 /** The zone whose bounds contain the position, if any. */
-export function zoneContaining<T extends { bounds: { north: number; south: number; east: number; west: number } }>(
-  zones: T[],
-  position: Coordinates,
-): T | null {
+export function zoneContaining<
+  T extends { bounds: { north: number; south: number; east: number; west: number } },
+>(zones: T[], position: Coordinates): T | null {
   return (
     zones.find(
       (zone) =>

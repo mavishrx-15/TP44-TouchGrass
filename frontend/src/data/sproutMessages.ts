@@ -6,6 +6,7 @@
  */
 import type { Preferences } from '@/types/personalisation'
 import type { PersonalisedRoute } from '@/types/personalisation'
+import type { CbdWeather } from '@/services/weather.service'
 
 export type Mood = 'calm' | 'okay' | 'tense' | 'stressed' | 'overwhelmed'
 
@@ -22,8 +23,20 @@ export const MOOD_OPTIONS: {
   { value: 'calm', label: 'Calm', color: '#8fd07a', mouth: 'M13 23 Q20 30 27 23', stress: 1 },
   { value: 'okay', label: 'Okay', color: '#b9d77a', mouth: 'M14 24 Q20 27 26 24', stress: 2 },
   { value: 'tense', label: 'A bit tense', color: '#e6d27a', mouth: 'M14 25 L26 25', stress: 3 },
-  { value: 'stressed', label: 'Stressed', color: '#ecb173', mouth: 'M14 27 Q20 22 26 27', stress: 4 },
-  { value: 'overwhelmed', label: 'Overwhelmed', color: '#e8957a', mouth: 'M13 28 Q20 20 27 28', stress: 5 },
+  {
+    value: 'stressed',
+    label: 'Stressed',
+    color: '#ecb173',
+    mouth: 'M14 27 Q20 22 26 27',
+    stress: 4,
+  },
+  {
+    value: 'overwhelmed',
+    label: 'Overwhelmed',
+    color: '#e8957a',
+    mouth: 'M13 28 Q20 20 27 28',
+    stress: 5,
+  },
 ]
 
 const MOOD_REPLIES: Record<Mood, string> = {
@@ -52,9 +65,27 @@ export const CANOPY_OPTIONS: {
   /** Short description under the label, as in the prototype. */
   hint: string
 }[] = [
-  { value: 'open', label: 'Open sky', sliderValue: 10, treeCount: 1, hint: 'A few trees, plenty of light' },
-  { value: 'mixed', label: 'A bit of both', sliderValue: 50, treeCount: 3, hint: 'Leafy patches with some sun' },
-  { value: 'dense', label: 'Deep canopy', sliderValue: 100, treeCount: 6, hint: 'As many trees as possible' },
+  {
+    value: 'open',
+    label: 'Open sky',
+    sliderValue: 10,
+    treeCount: 1,
+    hint: 'A few trees, plenty of light',
+  },
+  {
+    value: 'mixed',
+    label: 'A bit of both',
+    sliderValue: 50,
+    treeCount: 3,
+    hint: 'Leafy patches with some sun',
+  },
+  {
+    value: 'dense',
+    label: 'Deep canopy',
+    sliderValue: 100,
+    treeCount: 6,
+    hint: 'As many trees as possible',
+  },
 ]
 const CANOPY_REPLIES: Record<CanopyChoice, string> = {
   open: 'Open skies it is! Just me and a bit of sunshine.',
@@ -97,12 +128,17 @@ export function thermalFromSlider(value: number | null): ThermalChoice | null {
   return 'sunny'
 }
 
-/** US5.3: the shade step's opening line depends on the live CBD temperature band. */
-export function temperaturePrompt(temperatureCelsius: number | null): string {
-  if (temperatureCelsius === null) return 'Sun or shade?'
-  if (temperatureCelsius >= 25) return 'It’s warm in the city today. Sun or shade?'
-  if (temperatureCelsius >= 18) return 'It’s a mild day in the city. Sun or shade?'
-  return 'It’s a cool day in the city. Sun or shade?'
+/**
+ * US5.3: the shade step's opening line depends on the live CBD temperature
+ * band from GET /api/weather/now. Warm names the actual reading and nudges
+ * towards Cool and shaded, without preselecting it - mild and cool just ask.
+ */
+export function temperaturePrompt(weather: CbdWeather | null): string {
+  if (!weather) return 'Sun or shade?'
+  if (weather.band === 'warm')
+    return `It’s ${weather.temperatureC}°C in the city. I’d pick Cool and shaded today.`
+  if (weather.band === 'mild') return 'It’s mild in the city today. Sun or shade?'
+  return 'It’s cool in the city today. Sun or shade?'
 }
 
 export function noiseReply(value: Preferences['noise']): string | null {
@@ -131,9 +167,6 @@ export function placeChosenReply(label: string): string {
   return `Got it, ${label}. Ready when you are!`
 }
 
-export const OUTSIDE_CBD_REPLY =
-  'That’s outside the CBD, so I don’t know the trees there yet - pick a start point inside the dashed area.'
-
 /** Sprout's bubble once a route request has failed (US5.6 failure state). */
 export const ROUTE_FAILURE_BUBBLE = 'Hmm, the route didn’t grow this time. Want to try again?'
 
@@ -151,8 +184,7 @@ export function routeFailureMessage(raw: string | null): string {
   return 'I couldn’t grow a route from that start point this time. Give it another try.'
 }
 
-export const DEFAULT_MAP_REPLY =
-  'Tap a starting point. I only know the trees inside the dashed CBD area for now.'
+export const DEFAULT_MAP_REPLY = 'Tap a starting point, or search for one.'
 
 /**
  * US5.6: Sprout's route explanation. Reuses the backend's own matched/missed

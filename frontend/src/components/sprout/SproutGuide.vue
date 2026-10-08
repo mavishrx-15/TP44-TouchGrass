@@ -9,14 +9,13 @@ import GoogleMapCanvas from '@/components/GoogleMapCanvas.vue'
 import { useJourneyStore } from '@/stores/journey'
 import { useSproutStore } from '@/stores/sprout'
 import { useAccessibilityStore } from '@/stores/accessibility'
-import { CBD_CENTER, CBD_PRECINCT_ID, isWithinCbd, loadCbdZones } from '@/constants/cbd'
-import { getCbdWeather } from '@/services/weather.service'
+import { MELBOURNE_CENTER, loadAllZones } from '@/constants/zones'
+import { getCbdWeather, type CbdWeather } from '@/services/weather.service'
 import {
   AUTO_PRESET_NOTE,
   CANOPY_OPTIONS,
   DEFAULT_MAP_REPLY,
   MOOD_OPTIONS,
-  OUTSIDE_CBD_REPLY,
   ROUTE_FAILURE_BUBBLE,
   THERMAL_OPTIONS,
   allergyReply,
@@ -33,7 +32,7 @@ import {
   type Mood,
 } from '@/data/sproutMessages'
 import type { Preferences } from '@/types/personalisation'
-import type { Coordinates, Precinct, RouteOption, TreeZone, RoutePlace } from '@/types/discovery'
+import type { RouteOption, TreeZone, RoutePlace } from '@/types/discovery'
 import { STEP_ORDER, type SproutStep } from '@/stores/sprout'
 
 const STEP_LABELS: Record<SproutStep, string> = {
@@ -53,18 +52,12 @@ const router = useRouter()
 
 const zones = ref<TreeZone[]>([])
 const zoneCount = ref(0)
-const cbdOutline = ref<Coordinates[]>([])
 const zonesError = ref('')
-const temperature = ref<number | null>(null)
-const temperatureAvailable = ref(false)
+const weather = ref<CbdWeather | null>(null)
 const locating = ref(false)
 const locationError = ref('')
 const growing = ref(false)
 const growError = ref('')
-
-const cbdPrecinct = computed<Precinct[]>(() =>
-  journey.precincts.filter((p) => p.id === CBD_PRECINCT_ID),
-)
 
 const landmarks: { label: string; coordinates: { lat: number; lng: number } }[] = [
   { label: 'Flinders Street Station', coordinates: { lat: -37.8183, lng: 144.9671 } },
@@ -120,14 +113,12 @@ const stageSkyClass = computed(() =>
 async function loadZones() {
   zonesError.value = ''
   try {
-    // GET /api/cbd/zones is already the real Hoddle Grid polygon, not a
-    // precinct - no client-side CBD filtering needed any more.
-    const cbd = await loadCbdZones()
-    zones.value = cbd.zones
-    cbdOutline.value = cbd.outline
-    zoneCount.value = cbd.zoneCount
+    // Citywide, not CBD-only any more - every precinct's zones, merged.
+    const result = await loadAllZones()
+    zones.value = result.zones
+    zoneCount.value = result.zoneCount
   } catch {
-    zonesError.value = 'The CBD map could not be loaded.'
+    zonesError.value = 'The map could not be loaded.'
   }
 }
 
@@ -148,13 +139,7 @@ const mapRouteOptions = computed<RouteOption[]>(() => {
 })
 
 async function loadWeather() {
-  try {
-    const result = await getCbdWeather()
-    temperature.value = result.temperatureCelsius
-    temperatureAvailable.value = result.available
-  } catch {
-    temperatureAvailable.value = false
-  }
+  weather.value = await getCbdWeather()
 }
 
 onMounted(() => {
@@ -178,20 +163,27 @@ const sproutLine = computed(() => {
       return sprout.calmPresetApplied ? `${base} ${AUTO_PRESET_NOTE}` : base
     }
     case 'shade':
-      return thermalChoice.value ? thermalReply(thermalChoice.value) : temperaturePrompt(temperature.value)
+      return thermalChoice.value
+        ? thermalReply(thermalChoice.value)
+        : temperaturePrompt(weather.value)
     case 'journey': {
       const noise = noiseReply(journey.preferences.noise)
       const allergy = allergyReply(journey.preferences.allergy)
       return allergy ?? noise ?? 'Let’s make the walk easy on you.'
     }
     case 'location':
-      if (locationError.value) return OUTSIDE_CBD_REPLY
-      return journey.startLocation ? placeChosenReply(journey.startLocation.label) : DEFAULT_MAP_REPLY
+      if (locationError.value) return locationError.value
+      return journey.startLocation
+        ? placeChosenReply(journey.startLocation.label)
+        : DEFAULT_MAP_REPLY
     case 'route':
       if (journey.sproutRoute) {
         // Sprout's own fixed-template sentence (backend/app/services/sprout.py) -
         // never generated here, so it can never claim a match the route didn't make.
-        return journey.sproutRoute.explanation ?? `Here's a walk to ${journey.sproutRoute.destination.label}.`
+        return (
+          journey.sproutRoute.explanation ??
+          `Here's a walk to ${journey.sproutRoute.destination.label}.`
+        )
       }
       return growError.value ? ROUTE_FAILURE_BUBBLE : 'Growing your route…'
     default:
@@ -237,7 +229,6 @@ function setOrigin(value: RoutePlace | null) {
   journey.startLocation = value
 }
 function chooseLandmark(place: (typeof landmarks)[number]) {
-  if (!isWithinCbd(place.coordinates)) return
   setOrigin({ id: place.label, label: place.label, coordinates: place.coordinates })
 }
 async function useMyLocation() {
@@ -245,10 +236,6 @@ async function useMyLocation() {
   locationError.value = ''
   try {
     await journey.useCurrentLocation()
-    if (journey.startLocation && !isWithinCbd(journey.startLocation.coordinates)) {
-      journey.startLocation = null
-      locationError.value = OUTSIDE_CBD_REPLY
-    }
   } catch (e) {
     locationError.value = e instanceof Error ? e.message : 'Location is unavailable.'
   } finally {
@@ -309,7 +296,9 @@ watch(
         <button type="button" class="primary-button" @click="sprout.beginGuided">
           Hi Sprout, let’s go
         </button>
-        <button type="button" class="ghost-button" @click="sprout.skipToMap">Skip to the map</button>
+        <button type="button" class="ghost-button" @click="sprout.skipToMap">
+          Skip to the map
+        </button>
       </div>
       <HillsBackdrop />
     </div>
@@ -324,7 +313,8 @@ watch(
           :class="{
             active: item.active,
             reached: item.reached,
-            done: item.reached && !item.active && index < sprout.progress.findIndex((p) => p.active),
+            done:
+              item.reached && !item.active && index < sprout.progress.findIndex((p) => p.active),
           }"
           :disabled="!item.reached"
           :aria-current="item.active ? 'step' : undefined"
@@ -336,7 +326,9 @@ watch(
           </span>
           <span class="progress-label">{{ STEP_LABELS[item.id] }}</span>
         </button>
-        <button type="button" class="text-button replay" @click="sprout.replayIntro">Replay intro</button>
+        <button type="button" class="text-button replay" @click="sprout.replayIntro">
+          Replay intro
+        </button>
       </nav>
 
       <!-- Steps 5 and 6 are a full-bleed map with floating cards, as in the prototype -->
@@ -344,18 +336,17 @@ watch(
         <div class="map-stage">
           <div class="cbd-map">
             <GoogleMapCanvas
-              :center="CBD_CENTER"
+              :center="MELBOURNE_CENTER"
               :trees="[]"
               :zones="zones"
               :directions-open="sprout.step === 'route'"
               :route-options="mapRouteOptions"
               :origin="journey.startLocation?.coordinates"
               :destination="sprout.step === 'route' ? journey.destination?.coordinates : undefined"
-              :cbd-outline="cbdOutline"
               :auto-center="false"
             />
           </div>
-          <span class="map-label">TOUCHGRASS COVERS THE CBD</span>
+          <span class="map-label">TOUCHGRASS TREE-DENSE AREAS</span>
           <div class="map-legend" aria-label="Map legend">
             <span class="legend-title">TREE DENSITY · {{ zoneCount }} ZONES</span>
             <span><i class="swatch high" />High</span>
@@ -369,10 +360,9 @@ watch(
           <template v-if="sprout.step === 'location'">
             <span class="eyebrow">STEP 5 · YOUR LOCATION</span>
             <h2>Where are you starting from?</h2>
-            <p class="step-note">I only know the trees in Melbourne’s CBD for now.</p>
             <LocationSearch
               :model-value="journey.startLocation"
-              :precincts="cbdPrecinct"
+              :precincts="journey.precincts"
               :invalid="!!locationError"
               @update:model-value="setOrigin"
             />
@@ -387,10 +377,16 @@ watch(
                 {{ landmark.label }}
               </button>
             </div>
-            <button type="button" class="location-button" :disabled="locating" @click="useMyLocation">
-              <ElIcon><LocationIcon /></ElIcon>{{ locating ? 'Finding your location…' : 'Use my location' }}
+            <button
+              type="button"
+              class="location-button"
+              :disabled="locating"
+              @click="useMyLocation"
+            >
+              <ElIcon><LocationIcon /></ElIcon
+              >{{ locating ? 'Finding your location…' : 'Use my location' }}
             </button>
-            <p v-if="locationError" class="notice outside-cbd" role="alert">
+            <p v-if="locationError" class="notice location-notice" role="alert">
               <ElIcon><Warning /></ElIcon>{{ locationError }}
             </p>
             <p v-if="zonesError" class="form-error" role="alert">{{ zonesError }}</p>
@@ -430,16 +426,21 @@ watch(
                 </div>
               </div>
               <div v-if="journey.sproutRoute.summaryChips.length" class="preference-chips">
-                <span v-for="chip in journey.sproutRoute.summaryChips" :key="chip" class="preference-chip">{{
-                  chip
-                }}</span>
+                <span
+                  v-for="chip in journey.sproutRoute.summaryChips"
+                  :key="chip"
+                  class="preference-chip"
+                  >{{ chip }}</span
+                >
               </div>
               <p v-if="journey.sproutRoute.message" class="route-note" role="status">
                 {{ journey.sproutRoute.message }}
               </p>
               <div class="route-actions">
                 <button type="button" class="primary-button" @click="startWalk">Start walk</button>
-                <button type="button" class="ghost-button" @click="changeAnswers">Change answers</button>
+                <button type="button" class="ghost-button" @click="changeAnswers">
+                  Change answers
+                </button>
               </div>
               <p class="footnote">Zones from City of Melbourne tree data. Distances approximate.</p>
             </template>
@@ -483,7 +484,13 @@ watch(
               class="companion-trees"
               aria-hidden="true"
             >
-              <svg v-for="n in companionTreeCount" :key="n" width="34" height="40" viewBox="0 0 60 70">
+              <svg
+                v-for="n in companionTreeCount"
+                :key="n"
+                width="34"
+                height="40"
+                viewBox="0 0 60 70"
+              >
                 <rect x="27" y="44" width="6" height="24" rx="2" fill="#8a5a3b" />
                 <circle cx="30" cy="30" r="24" fill="#5fa150" />
               </svg>
@@ -511,7 +518,13 @@ watch(
                   <circle cx="20" cy="20" r="18" :fill="option.color" />
                   <circle cx="14" cy="17" r="2.2" fill="#2b2118" />
                   <circle cx="26" cy="17" r="2.2" fill="#2b2118" />
-                  <path :d="option.mouth" stroke="#2b2118" stroke-width="2.4" fill="none" stroke-linecap="round" />
+                  <path
+                    :d="option.mouth"
+                    stroke="#2b2118"
+                    stroke-width="2.4"
+                    fill="none"
+                    stroke-linecap="round"
+                  />
                 </svg>
                 <span>{{ option.label }}</span>
               </button>
@@ -559,7 +572,13 @@ watch(
                 <span class="option-title">{{ option.label }}</span>
                 <span class="option-hint">{{ option.hint }}</span>
                 <span class="tree-row" aria-hidden="true">
-                  <svg v-for="n in option.treeCount" :key="n" width="18" height="22" viewBox="0 0 60 70">
+                  <svg
+                    v-for="n in option.treeCount"
+                    :key="n"
+                    width="18"
+                    height="22"
+                    viewBox="0 0 60 70"
+                  >
                     <rect x="27" y="44" width="6" height="24" rx="2" fill="#8a5a3b" />
                     <circle cx="30" cy="30" r="24" fill="#5fa150" />
                   </svg>
@@ -572,10 +591,8 @@ watch(
           <section v-else-if="sprout.step === 'shade'" class="sprout-step">
             <span class="eyebrow">STEP 3 · SHADE AND THERMAL COMFORT</span>
             <div class="step-heading-row">
-              <h2>{{ temperaturePrompt(temperatureAvailable ? temperature : null) }}</h2>
-              <span v-if="temperatureAvailable && temperature !== null" class="temp-chip"
-                >CBD now · {{ temperature }}°C</span
-              >
+              <h2>{{ temperaturePrompt(weather) }}</h2>
+              <span v-if="weather" class="temp-chip">CBD now · {{ weather.temperatureC }}°C</span>
             </div>
             <div class="option-grid" role="group" aria-label="Shade and thermal comfort">
               <button
@@ -598,7 +615,9 @@ watch(
             <span class="eyebrow">STEP 4 · MAKE THE JOURNEY EASIER</span>
             <h2>Last bit. Let’s make the walk easy on you.</h2>
             <fieldset>
-              <legend><ElIcon><Clock /></ElIcon> How much time do you have?</legend>
+              <legend>
+                <ElIcon><Clock /></ElIcon> How much time do you have?
+              </legend>
               <div class="pills">
                 <button
                   v-for="option in times"
@@ -613,7 +632,9 @@ watch(
               </div>
             </fieldset>
             <fieldset>
-              <legend><ElIcon><Headset /></ElIcon> Noise level</legend>
+              <legend>
+                <ElIcon><Headset /></ElIcon> Noise level
+              </legend>
               <div class="pills">
                 <button
                   v-for="option in noiseOptions"
@@ -647,8 +668,12 @@ watch(
           <div class="step-nav">
             <button type="button" class="text-button" @click="sprout.back">Back</button>
             <div class="step-nav-right">
-              <button type="button" class="ghost-button" @click="sprout.skipToMap">Skip to map</button>
-              <button type="button" class="primary-button" @click="sprout.next">{{ nextButtonLabel }}</button>
+              <button type="button" class="ghost-button" @click="sprout.skipToMap">
+                Skip to map
+              </button>
+              <button type="button" class="primary-button" @click="sprout.next">
+                {{ nextButtonLabel }}
+              </button>
             </div>
           </div>
         </section>
@@ -668,6 +693,7 @@ watch(
   flex: 1;
   display: flex;
   flex-direction: column;
+  min-height: 0;
   font-family: var(--sp-sans);
   color: var(--sp-ink);
   background: var(--sp-cream);
@@ -767,6 +793,7 @@ h2 {
 
 /* Stepper */
 .sprout-progress {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -1066,8 +1093,7 @@ fieldset legend {
 .map-mode {
   position: relative;
   display: block;
-  height: calc(100vh - 150px);
-  min-height: 640px;
+  min-height: 0;
   overflow: hidden;
 }
 .map-stage {
@@ -1144,7 +1170,7 @@ fieldset legend {
   left: 22px;
   top: 58px;
   z-index: 2;
-  width: min(400px, calc(100% - 44px));
+  width: min(360px, calc(100% - 44px));
   max-height: calc(100% - 300px);
   overflow-y: auto;
   background: var(--sp-cream);
@@ -1272,7 +1298,7 @@ fieldset legend {
   font-size: 0.86rem;
   cursor: pointer;
 }
-.outside-cbd {
+.location-notice {
   display: flex;
   gap: 8px;
   align-items: flex-start;
@@ -1369,7 +1395,7 @@ fieldset legend {
   }
   .map-stage {
     position: relative;
-    height: 380px;
+    height: max(380px, 48dvh);
   }
   .float-card,
   .bubble-anchor {

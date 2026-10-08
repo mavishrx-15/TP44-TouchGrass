@@ -8,12 +8,13 @@ by nearest precinct.
 """
 
 import pytest
+from fastapi import HTTPException
 
 from app.routers.routes import Corridor
 from app.schemas.cbd import CbdZone
 from app.schemas.common import Coordinates
 from app.schemas.map_data import AreaMetrics, Bounds
-from app.schemas.planning import AreasRequest, PlanningRequest, Preferences
+from app.schemas.planning import AreasRequest, PlanningRequest, Preferences, RoutePlanningRequest
 from app.services import planning, sprout
 
 START = Coordinates(lat=-37.8183, lng=144.9671)  # Flinders Street Station
@@ -106,6 +107,38 @@ def corridor(
     pollen: int = 0, canopy: int = 50, park: int = 50, dense: float = 0.5, trees: int = 100
 ) -> Corridor:
     return Corridor(trees=trees, park=park, high_pollen=pollen, canopy=canopy, dense_share=dense)
+
+
+def test_selected_recommendation_outside_cbd_keeps_its_destination(monkeypatch):
+    selected = zone("selected", lat=-37.8, lng=144.99, density="Low")
+    other = zone("other", density="High")
+    monkeypatch.setattr(planning.repository, "candidate_zones", lambda session: [other, selected])
+    calls = []
+
+    def alternatives(origin, destination):
+        calls.append((origin, destination))
+        return [google(12, polyline="selected-path")]
+
+    monkeypatch.setattr(planning.google_routes, "walking_alternatives", alternatives)
+    monkeypatch.setattr(planning, "_decode_polyline", lambda value: value)
+    monkeypatch.setattr(planning, "_corridor", lambda path, session: corridor())
+    origin = Coordinates(lat=-37.8, lng=144.98)
+    result = planning.plan_route(
+        RoutePlanningRequest(
+            origin=origin, destinationZoneId="selected", preferences=Preferences(canopy="dense")
+        ),
+        None,
+    )
+    assert result.destination.zoneId == "selected"
+    assert result.origin == origin
+    assert calls == [(origin, selected.center)]
+
+
+def test_missing_selected_area_does_not_silently_choose_another(monkeypatch):
+    monkeypatch.setattr(planning.repository, "candidate_zones", lambda session: [zone("other")])
+    with pytest.raises(HTTPException) as error:
+        planning.plan_route(RoutePlanningRequest(origin=START, destinationZoneId="missing"), None)
+    assert error.value.status_code == 404
 
 
 # --- the bugs the design doc names ------------------------------------------

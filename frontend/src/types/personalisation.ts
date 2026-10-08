@@ -49,11 +49,8 @@ export interface MatchSummary {
   matches: PreferenceMatch[]
   sentence: string
 }
-export interface Recommendation extends Area {
-  estimatedMinutes: number
-  match: MatchSummary
-}
 export interface PersonalisedRoute extends RouteOption {
+  denseZoneShare?: number | null
   travelMode: TravelMode
   match: MatchSummary | null
   metrics: AreaMetrics | null

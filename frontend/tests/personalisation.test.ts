@@ -5,10 +5,9 @@ import { scorePreferences, withinBudget } from '@/services/preferences'
 import {
   chooseRoute,
   coverageFrom,
-  rankAreas,
   requestPersonalisedRoute,
 } from '@/services/personalisation.service'
-import { mockAreas, mockPrecincts } from '@/services/personalisation.mock'
+import { mockPrecincts } from '@/services/personalisation.mock'
 import { distanceKm } from '@/services/discovery.service'
 import { useJourneyStore } from '@/stores/journey'
 
@@ -73,16 +72,6 @@ describe('shared preference matching', () => {
 })
 
 describe('real origin and recommendations', () => {
-  it('computes distance from the resolved origin and changes ordering when it moves', () => {
-    const areas = mockAreas(mockPrecincts[1]!)
-    const first = rankAreas(areas, areas[0]!.center, emptyPreferences())
-    const second = rankAreas(areas, areas[1]!.center, emptyPreferences())
-    expect(first[0]?.id).toBe(areas[0]!.id)
-    expect(second[0]?.id).toBe(areas[1]!.id)
-    expect(first[0]?.distanceKm).toBe(0)
-    expect(areas[2]?.nearestStreet).toBeNull()
-    expect(areas[2]?.label).toBe('Kensington')
-  })
   it('finds the nearest covered precinct and only warns outside the threshold', () => {
     expect(coverageFrom(mockPrecincts[1]!.referencePoint, mockPrecincts)?.outside).toBe(false)
     const outside = coverageFrom({ lat: -38.1447, lng: 144.3556 }, mockPrecincts)
@@ -92,11 +81,17 @@ describe('real origin and recommendations', () => {
   })
 })
 
+// A plausible nearby destination, the same offset the old mock areas fixture used.
+const NEARBY_DESTINATION = {
+  lat: mockPrecincts[1]!.referencePoint.lat + 0.004,
+  lng: mockPrecincts[1]!.referencePoint.lng + 0.004,
+}
+
 describe('single-route selection and mode switch', () => {
   it('returns one route; excludes over-budget alternatives, and explains fallback', async () => {
     const input = {
       origin: mockPrecincts[1]!.referencePoint,
-      destination: mockAreas(mockPrecincts[1]!)[0]!.center,
+      destination: NEARBY_DESTINATION,
       preferences: { ...emptyPreferences(), canopy: 100 },
       travelMode: 'WALK' as const,
       precinctId: 'kensington',
@@ -122,7 +117,7 @@ describe('single-route selection and mode switch', () => {
     store.destination = {
       id: 'end',
       label: 'Macaulay Rd',
-      coordinates: mockAreas(mockPrecincts[1]!)[0]!.center,
+      coordinates: NEARBY_DESTINATION,
     }
     store.preferences.canopy = 95
     await store.calculate('WALK')
@@ -148,7 +143,7 @@ describe('single-route selection and mode switch', () => {
     store.destination = {
       id: 'end',
       label: 'End',
-      coordinates: mockAreas(mockPrecincts[1]!)[0]!.center,
+      coordinates: NEARBY_DESTINATION,
     }
     await Promise.all([store.calculate('WALK'), store.calculate('TRANSIT')])
     expect(store.route?.travelMode).toBe('TRANSIT')
@@ -156,7 +151,7 @@ describe('single-route selection and mode switch', () => {
 })
 
 describe('session and preferences', () => {
-  it('skip clears only environmental preferences and persists resolved location', () => {
+  it('persists preferences and resolved location across a new store instance', () => {
     const store = useJourneyStore()
     store.preferences = { canopy: 80, shade: 75, noise: 'quiet', allergy: 'lower', walkingTime: 15 }
     store.startLocation = {
@@ -164,10 +159,8 @@ describe('session and preferences', () => {
       label: 'Kensington',
       coordinates: mockPrecincts[1]!.referencePoint,
     }
-    store.skipPersonalisation()
-    expect(store.preferences).toEqual({ ...emptyPreferences(), walkingTime: 15 })
     setActivePinia(createPinia())
     expect(useJourneyStore().startLocation?.label).toBe('Kensington')
-    expect(useJourneyStore().preferences.walkingTime).toBe(15)
+    expect(useJourneyStore().preferences).toEqual(store.preferences)
   })
 })

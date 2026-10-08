@@ -1,27 +1,19 @@
-import { apiGet, apiPost } from '@/api/client'
+import { apiPost } from '@/api/client'
 import { distanceKm, getPlaceDetails, getPlaceSuggestions, getPrecincts } from './discovery.service'
-import { mockAreas, mockPlaces, mockPrecincts } from './personalisation.mock'
+import { mockPlaces, mockPrecincts } from './personalisation.mock'
 import {
   COVERAGE_THRESHOLD_KM,
   normalizeAreaMetrics,
   scorePreferences,
   withinBudget,
 } from './preferences'
-import type {
-  Coordinates,
-  PlaceSuggestion,
-  Precinct,
-  RoutePlace,
-  TreeRecord,
-  TreeZone,
-} from '@/types/discovery'
+import type { Coordinates, PlaceSuggestion, Precinct, RoutePlace } from '@/types/discovery'
 import type {
   Area,
   Coverage,
   PersonalisedRequest,
   PersonalisedRoute,
   Preferences,
-  Recommendation,
 } from '@/types/personalisation'
 
 // Existing maps, Places, zones and walking routes are LIVE by default.
@@ -88,92 +80,6 @@ export function deviceLocation(): Promise<RoutePlace> {
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 },
     )
   })
-}
-
-export async function loadAreas(precinct: Precinct): Promise<Area[]> {
-  if (USE_MOCK_DATA) {
-    await pause()
-    return mockAreas(precinct)
-  }
-  const slug = encodeURIComponent(precinct.id)
-  const [zones, treeResponse] = await Promise.allSettled([
-    apiGet<(TreeZone & Partial<Area>)[]>(`/api/zones?precinct=${slug}&limit=500`),
-    apiGet<Omit<TreeRecord, 'distanceKm' | 'mapPosition'>[]>(
-      `/api/trees?precinct=${slug}&limit=5000`,
-    ),
-  ])
-  if (zones.status === 'rejected') throw zones.reason
-  const trees = treeResponse.status === 'fulfilled' ? treeResponse.value : []
-  const grouped = new Map<string, TreeRecord[]>()
-  for (const tree of trees) {
-    const group = grouped.get(tree.zoneId) ?? []
-    group.push({
-      ...tree,
-      distanceKm: distanceKm(precinct.referencePoint, tree.coordinates),
-      mapPosition: { x: 0, y: 0 },
-    })
-    grouped.set(tree.zoneId, group)
-  }
-  return zones.value.map((area) => {
-    const records = grouped.get(area.id) ?? []
-    const complete = records.length === area.treeCount && records.length > 0
-    const counts = new Map<string, number>()
-    records.forEach((tree) => counts.set(tree.genus, (counts.get(tree.genus) ?? 0) + 1))
-    return {
-      ...area,
-      nearestStreet: area.nearestStreet ?? null,
-      precinctName: precinct.name,
-      label: area.nearestStreet ? `${precinct.name} · ${area.nearestStreet}` : precinct.name,
-      description: area.description ?? `${area.density}-density tree area.`,
-      mapPosition: { x: 0, y: 0, width: 0, height: 0 },
-      metrics: normalizeAreaMetrics(area.metrics ?? null) ?? {
-        canopy: { High: 0.9, Medium: 0.55, Low: 0.2 }[area.density],
-        parkShare: complete
-          ? records.filter((tree) => tree.locatedIn === 'Park').length / records.length
-          : null,
-        lowAllergyShare: null,
-        highPollenTrees: null,
-      },
-      genera:
-        area.genera ??
-        Array.from(counts, ([name, count]) => ({ name, count }))
-          .sort((a, b) => b.count - a.count)
-          .slice(0, 3),
-      trees: records,
-      dataNotes: area.dataNotes ?? [
-        'Tree density is used as a canopy proxy; allergy scoring is not yet available.',
-        ...(!complete
-          ? ['Tree breakdown is incomplete; shade and noise information is unavailable.']
-          : ['Shade and noise use park-side tree share, not measured temperature or sound.']),
-        ...(!area.nearestStreet ? ['Nearby street has not been supplied yet.'] : []),
-      ],
-    }
-  })
-}
-
-export function rankAreas(
-  areas: Area[],
-  origin: Coordinates,
-  preferences: Preferences,
-): Recommendation[] {
-  return areas
-    .map((area) => {
-      const km = distanceKm(origin, area.center)
-      const estimatedMinutes = Math.max(1, Math.ceil((km / 4.8) * 60))
-      return {
-        ...area,
-        distanceKm: km,
-        estimatedMinutes,
-        match: scorePreferences(area.metrics, preferences, estimatedMinutes),
-      }
-    })
-    .sort(
-      (a, b) =>
-        Number(withinBudget(b.estimatedMinutes, preferences.walkingTime)) -
-          Number(withinBudget(a.estimatedMinutes, preferences.walkingTime)) ||
-        b.match.score - a.match.score ||
-        a.distanceKm - b.distanceKm,
-    )
 }
 
 export function chooseRoute(

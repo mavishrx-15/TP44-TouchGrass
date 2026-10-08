@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, watch } from 'vue'
 import { useJourneyStore } from '@/stores/journey'
 import { useRewardsStore } from '@/stores/rewards'
 import { POINTS_PER_WALK, dayKey } from '@/services/rewards.logic'
@@ -27,32 +27,51 @@ function isNew(area: AreaOption): boolean {
 function loadAreas() {
   if (!journey.startLocation) return
   const today = dayKey(new Date())
-  const excludedZoneIds = rewards.state.visits.filter((visit) => visit.date === today).map((visit) => visit.zoneId)
+  const excludedZoneIds = rewards.state.visits
+    .filter((visit) => visit.date === today)
+    .map((visit) => visit.zoneId)
   void journey.findSproutAreas({ excludedZoneIds, limit: 3 })
 }
 
-onMounted(loadAreas)
+watch(
+  () => [
+    journey.startLocation?.coordinates.lat,
+    journey.startLocation?.coordinates.lng,
+    rewards.state.visits.length,
+  ],
+  loadAreas,
+  { immediate: true },
+)
 </script>
 
 <template>
   <section class="nearby">
     <span class="eyebrow">FIND MORE TREES NEAR YOU</span>
-    <p v-if="!journey.startLocation" class="empty">Choose a start point on the Journey map to see nearby areas.</p>
+    <p v-if="journey.startLocation" class="empty">
+      Starting from {{ journey.startLocation.label }}.
+    </p>
+    <p v-if="!journey.startLocation" class="empty">
+      Choose a start point on the Journey map to see nearby areas.
+    </p>
     <p v-else-if="journey.sproutAreasLoading" class="empty">Looking for nearby areas…</p>
     <p v-else-if="journey.sproutAreasError" class="empty">{{ journey.sproutAreasError }}</p>
-    <p v-else-if="candidates.length === 0" class="empty">No other tree-dense areas to suggest right now.</p>
+    <p v-else-if="candidates.length === 0" class="empty">
+      No other tree-dense areas to suggest right now.
+    </p>
     <ol v-else class="list">
       <li v-for="(area, index) in candidates" :key="area.destination.zoneId">
-        <button type="button" class="area" @click="emit('pick', area)">
+        <button
+          type="button"
+          class="area"
+          :disabled="journey.sproutRouteLoading"
+          @click="emit('pick', area)"
+        >
           <span class="number" aria-hidden="true">{{ index + 1 }}</span>
           <span class="text">
             <span class="name">{{ area.destination.label }}</span>
             <span class="meta">
-              {{ area.destination.treeCount }} trees · {{ Math.round(area.estimatedMinutes) }} min walk<template
-                v-if="isNew(area)"
-              >
-                · new area</template
-              >
+              {{ area.destination.treeCount }} trees · {{ Math.round(area.estimatedMinutes) }} min
+              walk<template v-if="isNew(area)"> · new area</template>
             </span>
           </span>
           <span class="points">+{{ POINTS_PER_WALK }} pts</span>
