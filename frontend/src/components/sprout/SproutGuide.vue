@@ -9,14 +9,13 @@ import GoogleMapCanvas from '@/components/GoogleMapCanvas.vue'
 import { useJourneyStore } from '@/stores/journey'
 import { useSproutStore } from '@/stores/sprout'
 import { useAccessibilityStore } from '@/stores/accessibility'
-import { CBD_CENTER, CBD_PRECINCT_ID, isWithinCbd, loadCbdZones } from '@/constants/cbd'
+import { MELBOURNE_CENTER, loadAllZones } from '@/constants/zones'
 import { getCbdWeather } from '@/services/weather.service'
 import {
   AUTO_PRESET_NOTE,
   CANOPY_OPTIONS,
   DEFAULT_MAP_REPLY,
   MOOD_OPTIONS,
-  OUTSIDE_CBD_REPLY,
   ROUTE_FAILURE_BUBBLE,
   THERMAL_OPTIONS,
   allergyReply,
@@ -33,7 +32,7 @@ import {
   type Mood,
 } from '@/data/sproutMessages'
 import type { Preferences } from '@/types/personalisation'
-import type { Coordinates, Precinct, RouteOption, TreeZone, RoutePlace } from '@/types/discovery'
+import type { RouteOption, TreeZone, RoutePlace } from '@/types/discovery'
 import { STEP_ORDER, type SproutStep } from '@/stores/sprout'
 
 const STEP_LABELS: Record<SproutStep, string> = {
@@ -53,7 +52,6 @@ const router = useRouter()
 
 const zones = ref<TreeZone[]>([])
 const zoneCount = ref(0)
-const cbdOutline = ref<Coordinates[]>([])
 const zonesError = ref('')
 const temperature = ref<number | null>(null)
 const temperatureAvailable = ref(false)
@@ -61,10 +59,6 @@ const locating = ref(false)
 const locationError = ref('')
 const growing = ref(false)
 const growError = ref('')
-
-const cbdPrecinct = computed<Precinct[]>(() =>
-  journey.precincts.filter((p) => p.id === CBD_PRECINCT_ID),
-)
 
 const landmarks: { label: string; coordinates: { lat: number; lng: number } }[] = [
   { label: 'Flinders Street Station', coordinates: { lat: -37.8183, lng: 144.9671 } },
@@ -120,14 +114,12 @@ const stageSkyClass = computed(() =>
 async function loadZones() {
   zonesError.value = ''
   try {
-    // GET /api/cbd/zones is already the real Hoddle Grid polygon, not a
-    // precinct - no client-side CBD filtering needed any more.
-    const cbd = await loadCbdZones()
-    zones.value = cbd.zones
-    cbdOutline.value = cbd.outline
-    zoneCount.value = cbd.zoneCount
+    // Citywide, not CBD-only any more - every precinct's zones, merged.
+    const result = await loadAllZones()
+    zones.value = result.zones
+    zoneCount.value = result.zoneCount
   } catch {
-    zonesError.value = 'The CBD map could not be loaded.'
+    zonesError.value = 'The map could not be loaded.'
   }
 }
 
@@ -185,7 +177,7 @@ const sproutLine = computed(() => {
       return allergy ?? noise ?? 'Let’s make the walk easy on you.'
     }
     case 'location':
-      if (locationError.value) return OUTSIDE_CBD_REPLY
+      if (locationError.value) return locationError.value
       return journey.startLocation ? placeChosenReply(journey.startLocation.label) : DEFAULT_MAP_REPLY
     case 'route':
       if (journey.sproutRoute) {
@@ -237,7 +229,6 @@ function setOrigin(value: RoutePlace | null) {
   journey.startLocation = value
 }
 function chooseLandmark(place: (typeof landmarks)[number]) {
-  if (!isWithinCbd(place.coordinates)) return
   setOrigin({ id: place.label, label: place.label, coordinates: place.coordinates })
 }
 async function useMyLocation() {
@@ -245,10 +236,6 @@ async function useMyLocation() {
   locationError.value = ''
   try {
     await journey.useCurrentLocation()
-    if (journey.startLocation && !isWithinCbd(journey.startLocation.coordinates)) {
-      journey.startLocation = null
-      locationError.value = OUTSIDE_CBD_REPLY
-    }
   } catch (e) {
     locationError.value = e instanceof Error ? e.message : 'Location is unavailable.'
   } finally {
@@ -344,18 +331,17 @@ watch(
         <div class="map-stage">
           <div class="cbd-map">
             <GoogleMapCanvas
-              :center="CBD_CENTER"
+              :center="MELBOURNE_CENTER"
               :trees="[]"
               :zones="zones"
               :directions-open="sprout.step === 'route'"
               :route-options="mapRouteOptions"
               :origin="journey.startLocation?.coordinates"
               :destination="sprout.step === 'route' ? journey.destination?.coordinates : undefined"
-              :cbd-outline="cbdOutline"
               :auto-center="false"
             />
           </div>
-          <span class="map-label">TOUCHGRASS COVERS THE CBD</span>
+          <span class="map-label">TOUCHGRASS TREE-DENSE AREAS</span>
           <div class="map-legend" aria-label="Map legend">
             <span class="legend-title">TREE DENSITY · {{ zoneCount }} ZONES</span>
             <span><i class="swatch high" />High</span>
@@ -369,10 +355,9 @@ watch(
           <template v-if="sprout.step === 'location'">
             <span class="eyebrow">STEP 5 · YOUR LOCATION</span>
             <h2>Where are you starting from?</h2>
-            <p class="step-note">I only know the trees in Melbourne’s CBD for now.</p>
             <LocationSearch
               :model-value="journey.startLocation"
-              :precincts="cbdPrecinct"
+              :precincts="journey.precincts"
               :invalid="!!locationError"
               @update:model-value="setOrigin"
             />
@@ -390,7 +375,7 @@ watch(
             <button type="button" class="location-button" :disabled="locating" @click="useMyLocation">
               <ElIcon><LocationIcon /></ElIcon>{{ locating ? 'Finding your location…' : 'Use my location' }}
             </button>
-            <p v-if="locationError" class="notice outside-cbd" role="alert">
+            <p v-if="locationError" class="notice location-notice" role="alert">
               <ElIcon><Warning /></ElIcon>{{ locationError }}
             </p>
             <p v-if="zonesError" class="form-error" role="alert">{{ zonesError }}</p>
@@ -1272,7 +1257,7 @@ fieldset legend {
   font-size: 0.86rem;
   cursor: pointer;
 }
-.outside-cbd {
+.location-notice {
   display: flex;
   gap: 8px;
   align-items: flex-start;

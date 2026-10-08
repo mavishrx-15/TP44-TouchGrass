@@ -14,6 +14,13 @@ export const OFF_ROUTE_M = 40
 export const OFF_ROUTE_SECONDS = 20
 export const WEAK_GPS_ACCURACY_M = 50
 export const ARRIVAL_RADIUS_M = 40
+/**
+ * Beyond this, the live position is nowhere near the route - not CBD-specific
+ * any more, since a destination can now be anywhere in the city. Used to
+ * suggest the demo walk instead of chasing reroute/arrival logic that will
+ * never make sense from this far away.
+ */
+export const FAR_FROM_ROUTE_M = 3000
 export const TURN_ALERT_M = 50
 export const ALMOST_RADIUS_M = 100
 export const TIP_COOLDOWN_MS = 60_000

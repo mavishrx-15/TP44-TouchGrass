@@ -131,9 +131,6 @@ export function placeChosenReply(label: string): string {
   return `Got it, ${label}. Ready when you are!`
 }
 
-export const OUTSIDE_CBD_REPLY =
-  'That’s outside the CBD, so I don’t know the trees there yet - pick a start point inside the dashed area.'
-
 /** Sprout's bubble once a route request has failed (US5.6 failure state). */
 export const ROUTE_FAILURE_BUBBLE = 'Hmm, the route didn’t grow this time. Want to try again?'
 
@@ -151,8 +148,7 @@ export function routeFailureMessage(raw: string | null): string {
   return 'I couldn’t grow a route from that start point this time. Give it another try.'
 }
 
-export const DEFAULT_MAP_REPLY =
-  'Tap a starting point. I only know the trees inside the dashed CBD area for now.'
+export const DEFAULT_MAP_REPLY = 'Tap a starting point, or search for one.'
 
 /**
  * US5.6: Sprout's route explanation. Reuses the backend's own matched/missed

@@ -5,18 +5,21 @@ That is what fixes the old bugs: a 20+ min choice getting a 7 min walk, pollen
 never changing which route was picked, and a State Library start being sent to
 a one-zone precinct.
 
-    1. Reject a start outside the CBD (422 outside_cbd).
-    2. Estimate every CBD zone's walk — straight line x 1.3 / 80 m per minute —
-       and prefer the ones inside the walking-time band.
-    3. Filter by canopy, then rank by park share and, for Avoid high pollen,
+    1. Estimate every zone's walk, citywide — straight line x 1.3 / 80 m per
+       minute — and prefer the ones inside the walking-time band.
+    2. Filter by canopy, then rank by park share and, for Avoid high pollen,
        by the smallest share of high-pollen trees.
-    4. Ask Google for routes to the top three and measure each one's corridor.
-    5. Pick a route whose real time is in the band; then the smallest share of
+    3. Ask Google for routes to the top three and measure each one's corridor.
+    4. Pick a route whose real time is in the band; then the smallest share of
        high-pollen trees, if asked; then most canopy; then shortest.
-    6. If none fits the band, return the closest and say so.
+    5. If none fits the band, return the closest and say so.
 
-Steps 2 and 3 alone are /api/sprout/areas, so "See other options" and "Find
+Steps 1 and 2 alone are /api/sprout/areas, so "See other options" and "Find
 more trees near you" rank exactly the way the route does.
+
+Candidates are every zone citywide, not CBD-only - that restriction (and its
+422 outside_cbd rejection) was dropped by team decision; see
+app.repositories.planning.candidate_zones.
 """
 
 from dataclasses import dataclass
@@ -24,7 +27,6 @@ from dataclasses import dataclass
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from app.cbd import require_inside
 from app.integrations import google_routes
 from app.repositories import planning as repository
 from app.routers.routes import Corridor, _corridor, _decode_polyline, _distance_m
@@ -51,8 +53,8 @@ WALK_METRES_PER_MINUTE = 80
 REROUTE_INTERVAL_SECONDS = 20
 GOOGLE_CANDIDATES = 3
 
-# Inside the CBD only two zones are High, so "dense" has to admit Medium or it
-# would leave almost nothing to choose from (design doc, section 2).
+# "Dense" admits Medium as well as High, so it doesn't leave too few zones to
+# choose from (design doc, section 2).
 DENSE_ENOUGH = {"Medium", "High"}
 
 # Shade is mapped to 20 / 50 / 85 so the existing park-share check keeps
@@ -95,11 +97,10 @@ class Option:
 
 def plan_route(request: PlanningRequest, session: Session) -> PlannedRoute:
     origin, preferences = request.origin, request.preferences
-    require_inside(origin.lat, origin.lng)
 
     ranked = _ranked(origin, preferences, repository.candidate_zones(session))
     if not ranked:
-        raise HTTPException(status_code=404, detail="No tree-dense area was found in the CBD.")
+        raise HTTPException(status_code=404, detail="No tree-dense area was found.")
 
     options = [
         Option(
@@ -142,7 +143,6 @@ def plan_route(request: PlanningRequest, session: Session) -> PlannedRoute:
 
 def recommend_areas(request: AreasRequest, session: Session) -> AreasResponse:
     origin = request.origin
-    require_inside(origin.lat, origin.lng)
     ranked = _ranked(
         origin,
         request.preferences,
@@ -167,7 +167,7 @@ def _ranked(
     zones: list[CbdZone],
     excluded: set[str] | frozenset[str] = frozenset(),
 ) -> list[Candidate]:
-    """Steps 2 and 3: every CBD zone, best first.
+    """Steps 1 and 2: every zone citywide, best first.
 
     Zones inside the time band come first; when none are, the nearest to it
     lead instead, so there is always a closest answer rather than an empty list.

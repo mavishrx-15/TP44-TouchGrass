@@ -8,13 +8,14 @@ import GroundingSteps from '@/components/walk/GroundingSteps.vue'
 import PinTreeFlow from '@/components/walk/PinTreeFlow.vue'
 import StressCheckIn from '@/components/walk/StressCheckIn.vue'
 import NearbyAreas from '@/components/rewards/NearbyAreas.vue'
-import { CBD_CENTER, getZoneFacts, isWithinCbd, loadCbdZones, type ZoneFacts } from '@/constants/cbd'
+import { MELBOURNE_CENTER, getZoneFacts, loadAllZones, type ZoneFacts } from '@/constants/zones'
 import { getApprovedMessages, type PublicMessage } from '@/services/care.service'
 import { decodePolyline } from '@/services/polyline'
 import { canopyFriendProgress, visitNumber } from '@/services/rewards.logic'
 import {
   ALMOST_RADIUS_M,
   ARRIVAL_RADIUS_M,
+  FAR_FROM_ROUTE_M,
   OFF_ROUTE_M,
   TURN_ALERT_M,
   WEAK_GPS_ACCURACY_M,
@@ -72,10 +73,10 @@ const rewards = useRewardsStore()
 const phase = ref<Phase>('intro')
 /** searching: no fix yet. lost: signal dropped, still watching. denied: permission refused, for good. */
 const gps = ref<'off' | 'searching' | 'on' | 'weak' | 'lost' | 'denied'>('off')
-/** A simulated walk along the route, for demos away from the CBD. */
+/** A simulated walk along the route, for demos far from the actual destination. */
 const demoMode = ref(false)
-/** The real position is outside the CBD, so it cannot sit on this route. */
-const outsideCbd = ref(false)
+/** The real position is too far from this route to track live. */
+const farFromRoute = ref(false)
 let demoTimer: ReturnType<typeof setInterval> | undefined
 let demoMetres = 0
 const position = ref<Coordinates | null>(null)
@@ -86,7 +87,6 @@ const worse = ref(false)
 const helpOpen = ref(false)
 const clock = ref(Date.now())
 const zones = ref<TreeZone[]>([])
-const cbdOutline = ref<Coordinates[]>([])
 const tips = ref<{ id: number; kind: TipKind; text: string }[]>([])
 const rerouteOpen = ref(false)
 const rerouteDeclined = ref(false)
@@ -203,7 +203,7 @@ const progress = computed(() => {
     remainingM: Math.max(0, totalM.value - walked),
     offRouteM: 0,
     segmentIndex: 0,
-    snapped: path.value[0] ?? CBD_CENTER,
+    snapped: path.value[0] ?? MELBOURNE_CENTER,
   } satisfies WalkProgress
 })
 const percent = computed(() => (totalM.value ? Math.round((progress.value.walkedM / totalM.value) * 100) : 0))
@@ -264,9 +264,8 @@ const sproutFace = computed<'happy' | 'concerned' | 'excited' | 'calm' | 'gratef
 
 async function loadZones() {
   try {
-    const cbd = await loadCbdZones()
-    zones.value = cbd.zones
-    cbdOutline.value = cbd.outline
+    const result = await loadAllZones()
+    zones.value = result.zones
   } catch {
     zones.value = []
   }
@@ -334,9 +333,11 @@ function evaluateTips(now: number) {
   if (progress.value.walkedM >= totalM.value / 2 && totalM.value > 0) {
     candidates.push({ kind: 'checkin', key: 'checkin', text: TIP_TEXT.checkin })
   }
-  // The breathe tip says the GPS is locked, so it waits for a real fix. With no GPS, it still runs.
+  // The breathe tip says the GPS is locked, so it only claims that when the
+  // fix is actually good - weak/lost/denied all show their own "tips follow
+  // the clock" note elsewhere on this screen, so the tip text must agree.
   if (gps.value !== 'searching') {
-    const locked = gps.value === 'on' || gps.value === 'weak' || gps.value === 'lost'
+    const locked = gps.value === 'on'
     candidates.push({
       kind: 'breathe',
       key: 'breathe',
@@ -361,10 +362,10 @@ function onFix(fix: GeolocationPosition) {
     evaluateTips(now)
     return
   }
-  // Outside the CBD the real dot cannot follow this route, so skip reroute prompts there.
-  outsideCbd.value = !demoMode.value && !isWithinCbd(position.value)
+  // Too far from the route for the real dot to follow it, so skip reroute prompts there.
   const live = liveProgress.value
-  if (live && !outsideCbd.value) {
+  farFromRoute.value = !demoMode.value && (!live || live.offRouteM > FAR_FROM_ROUTE_M)
+  if (live && !farFromRoute.value) {
     offRoute = nextOffRouteState(offRoute, live.offRouteM, now)
     if (offRoute.offSince === null) rerouteDeclined.value = false
     if (offRoute.shouldAsk && !rerouteDeclined.value) rerouteOpen.value = true
@@ -416,7 +417,7 @@ function onVisibilityChange() {
 function startDemo() {
   stopTracking()
   demoMode.value = true
-  outsideCbd.value = false
+  farFromRoute.value = false
   demoMetres = 0
   gps.value = 'on'
   void keepScreenOn()
@@ -622,7 +623,7 @@ onBeforeUnmount(() => {
   document.removeEventListener('visibilitychange', onVisibilityChange)
 })
 
-const arrivalCenter = computed(() => journey.destination?.coordinates ?? CBD_CENTER)
+const arrivalCenter = computed(() => journey.destination?.coordinates ?? MELBOURNE_CENTER)
 const mapCenterAuto = computed(() => phase.value === 'grounding')
 </script>
 
@@ -670,7 +671,7 @@ const mapCenterAuto = computed(() => phase.value === 'grounding')
       <section class="map-column" aria-label="Walk map">
         <div class="walk-map">
           <GoogleMapCanvas
-            :center="mapCenterAuto ? arrivalCenter : CBD_CENTER"
+            :center="mapCenterAuto ? arrivalCenter : MELBOURNE_CENTER"
             :trees="[]"
             :zones="zones"
             :directions-open="false"
@@ -681,7 +682,6 @@ const mapCenterAuto = computed(() => phase.value === 'grounding')
             :remaining-path="remainingPath"
             :user-position="gps === 'on' ? position : null"
             :message-pins="messagePins"
-            :cbd-outline="cbdOutline"
             :auto-center="mapCenterAuto"
             @select-message="onMessagePin"
           />
@@ -763,9 +763,9 @@ const mapCenterAuto = computed(() => phase.value === 'grounding')
             <p v-if="gps === 'weak'" class="weak-note" role="status">
               <ElIcon><Warning /></ElIcon> GPS signal weak. Tips follow the clock for now.
             </p>
-            <div v-if="outsideCbd && !demoMode" class="reroute" role="status">
+            <div v-if="farFromRoute && !demoMode" class="reroute" role="status">
               <p>
-                You’re outside the CBD, so your live dot can’t sit on this route. Try the demo walk to see the full flow.
+                Your live location is too far from this route to track. Try the demo walk to see the full flow.
               </p>
               <button type="button" class="primary-button" @click="switchToDemo">Switch to demo walk</button>
             </div>
