@@ -10,6 +10,7 @@ from app.config import settings
 PHOTO = "data:image/jpeg;base64,/9j/4AAQSkZJRg=="
 ZONE = "-37.795_144.915"
 ADMIN = {"X-Care-Admin": "admin-secret"}
+DEVICE = "device-0000001"
 
 
 def _pin(client, **overrides):
@@ -19,11 +20,27 @@ def _pin(client, **overrides):
         "longitude": 144.9151,
         "accuracyM": 12.5,
         "photoDataUrl": PHOTO,
+        "deviceId": DEVICE,
     }
     body.update(overrides)
     response = client.post("/api/care/pins", json=body)
     assert response.status_code == 201, response.text
     return response.json()
+
+
+def _device_headers(pin: dict) -> dict:
+    """The X-Device-Token a real client would store from the pin response and
+    send back on later requests from the same device."""
+    token = pin.get("deviceToken")
+    return {"X-Device-Token": token} if token else {}
+
+
+def _message(client, pin: dict, **overrides):
+    body = {"body": "Thanks for the shade", "deviceId": DEVICE}
+    body.update(overrides)
+    return client.post(
+        f"/api/care/pins/{pin['id']}/messages", json=body, headers=_device_headers(pin)
+    )
 
 
 def _admin_settings(monkeypatch):
@@ -46,7 +63,13 @@ def test_pin_without_photo_is_valid(client):
 def test_unknown_zone_is_rejected(client):
     response = client.post(
         "/api/care/pins",
-        json={"zoneId": "nope", "latitude": -37.8, "longitude": 144.9, "accuracyM": 5},
+        json={
+            "zoneId": "nope",
+            "latitude": -37.8,
+            "longitude": 144.9,
+            "accuracyM": 5,
+            "deviceId": DEVICE,
+        },
     )
     assert response.status_code == 404
 
@@ -59,6 +82,7 @@ def test_photo_must_be_an_allowed_image_type(client):
             "longitude": 144.9,
             "accuracyM": 5,
             "photoDataUrl": "data:text/html;base64,PGgxPg==",
+            "deviceId": DEVICE,
         },
     )
     assert response.status_code == 422
@@ -68,7 +92,13 @@ def test_photo_over_size_limit_is_rejected(client):
     huge = "data:image/png;base64," + "A" * 2_000_001
     response = client.post(
         "/api/care/pins",
-        json={"latitude": -37.8, "longitude": 144.9, "accuracyM": 5, "photoDataUrl": huge},
+        json={
+            "latitude": -37.8,
+            "longitude": 144.9,
+            "accuracyM": 5,
+            "photoDataUrl": huge,
+            "deviceId": DEVICE,
+        },
     )
     assert response.status_code == 422
 
@@ -79,15 +109,17 @@ def test_retaking_a_photo_sends_it_back_to_pending(client, monkeypatch):
     client.post(
         f"/api/care/pins/{pin['id']}/photo/review", json={"status": "approved"}, headers=ADMIN
     )
-    retaken = client.put(f"/api/care/pins/{pin['id']}/photo", json={"photoDataUrl": PHOTO}).json()
+    retaken = client.put(
+        f"/api/care/pins/{pin['id']}/photo",
+        json={"photoDataUrl": PHOTO, "deviceId": DEVICE},
+        headers=_device_headers(pin),
+    ).json()
     assert retaken["photoStatus"] == "pending"
 
 
 def test_message_starts_pending_and_is_hidden_from_the_area(client):
     pin = _pin(client)
-    message = client.post(
-        f"/api/care/pins/{pin['id']}/messages", json={"body": "Thanks for the shade"}
-    ).json()
+    message = _message(client, pin).json()
     assert message["status"] == "pending"
     assert client.get(f"/api/care/zones/{ZONE}/messages").json() == []
 
@@ -95,9 +127,7 @@ def test_message_starts_pending_and_is_hidden_from_the_area(client):
 def test_approved_message_is_public_with_its_photo_only_if_photo_approved(client, monkeypatch):
     _admin_settings(monkeypatch)
     pin = _pin(client)
-    message = client.post(
-        f"/api/care/pins/{pin['id']}/messages", json={"body": "Thanks for the shade"}
-    ).json()
+    message = _message(client, pin).json()
     client.post(
         f"/api/care/messages/{message['id']}/review", json={"status": "approved"}, headers=ADMIN
     )
@@ -117,7 +147,7 @@ def test_approved_message_is_public_with_its_photo_only_if_photo_approved(client
 def test_rejected_message_never_appears(client, monkeypatch):
     _admin_settings(monkeypatch)
     pin = _pin(client)
-    message = client.post(f"/api/care/pins/{pin['id']}/messages", json={"body": "spam"}).json()
+    message = _message(client, pin, body="spam").json()
     client.post(
         f"/api/care/messages/{message['id']}/review", json={"status": "rejected"}, headers=ADMIN
     )
@@ -127,9 +157,8 @@ def test_rejected_message_never_appears(client, monkeypatch):
 def test_damage_report_is_never_public_even_when_approved(client, monkeypatch):
     _admin_settings(monkeypatch)
     pin = _pin(client)
-    report = client.post(
-        f"/api/care/pins/{pin['id']}/messages",
-        json={"body": "Large branch hanging over the path", "kind": "damage_report"},
+    report = _message(
+        client, pin, body="Large branch hanging over the path", kind="damage_report"
     ).json()
     assert report["kind"] == "damage_report"
     client.post(
@@ -140,20 +169,20 @@ def test_damage_report_is_never_public_even_when_approved(client, monkeypatch):
 
 def test_empty_message_is_rejected(client):
     pin = _pin(client)
-    response = client.post(f"/api/care/pins/{pin['id']}/messages", json={"body": "   "})
+    response = _message(client, pin, body="   ")
     assert response.status_code == 422
 
 
 def test_message_over_limit_is_rejected(client):
     pin = _pin(client)
-    response = client.post(f"/api/care/pins/{pin['id']}/messages", json={"body": "x" * 501})
+    response = _message(client, pin, body="x" * 501)
     assert response.status_code == 422
 
 
 def test_review_needs_the_admin_token(client, monkeypatch):
     _admin_settings(monkeypatch)
     pin = _pin(client)
-    message = client.post(f"/api/care/pins/{pin['id']}/messages", json={"body": "hello"}).json()
+    message = _message(client, pin, body="hello").json()
     no_token = client.post(
         f"/api/care/messages/{message['id']}/review", json={"status": "approved"}
     )
@@ -169,7 +198,7 @@ def test_review_needs_the_admin_token(client, monkeypatch):
 def test_nobody_can_approve_when_admin_token_is_unset(client, monkeypatch):
     monkeypatch.setattr(settings, "care_admin_token", "")
     pin = _pin(client)
-    message = client.post(f"/api/care/pins/{pin['id']}/messages", json={"body": "hello"}).json()
+    message = _message(client, pin, body="hello").json()
     response = client.post(
         f"/api/care/messages/{message['id']}/review",
         json={"status": "approved"},

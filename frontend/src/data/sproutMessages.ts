@@ -6,6 +6,7 @@
  */
 import type { Preferences } from '@/types/personalisation'
 import type { PersonalisedRoute } from '@/types/personalisation'
+import type { CbdWeather } from '@/services/weather.service'
 
 export type Mood = 'calm' | 'okay' | 'tense' | 'stressed' | 'overwhelmed'
 
@@ -127,12 +128,17 @@ export function thermalFromSlider(value: number | null): ThermalChoice | null {
   return 'sunny'
 }
 
-/** US5.3: the shade step's opening line depends on the live CBD temperature band. */
-export function temperaturePrompt(temperatureCelsius: number | null): string {
-  if (temperatureCelsius === null) return 'Sun or shade?'
-  if (temperatureCelsius >= 25) return 'It’s warm in the city today. Sun or shade?'
-  if (temperatureCelsius >= 18) return 'It’s a mild day in the city. Sun or shade?'
-  return 'It’s a cool day in the city. Sun or shade?'
+/**
+ * US5.3: the shade step's opening line depends on the live CBD temperature
+ * band from GET /api/weather/now. Warm names the actual reading and nudges
+ * towards Cool and shaded, without preselecting it - mild and cool just ask.
+ */
+export function temperaturePrompt(weather: CbdWeather | null): string {
+  if (!weather) return 'Sun or shade?'
+  if (weather.band === 'warm')
+    return `It’s ${weather.temperatureC}°C in the city. I’d pick Cool and shaded today.`
+  if (weather.band === 'mild') return 'It’s mild in the city today. Sun or shade?'
+  return 'It’s cool in the city today. Sun or shade?'
 }
 
 export function noiseReply(value: Preferences['noise']): string | null {

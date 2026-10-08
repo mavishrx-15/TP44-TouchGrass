@@ -10,7 +10,7 @@ import { useJourneyStore } from '@/stores/journey'
 import { useSproutStore } from '@/stores/sprout'
 import { useAccessibilityStore } from '@/stores/accessibility'
 import { MELBOURNE_CENTER, loadAllZones } from '@/constants/zones'
-import { getCbdWeather } from '@/services/weather.service'
+import { getCbdWeather, type CbdWeather } from '@/services/weather.service'
 import {
   AUTO_PRESET_NOTE,
   CANOPY_OPTIONS,
@@ -53,8 +53,7 @@ const router = useRouter()
 const zones = ref<TreeZone[]>([])
 const zoneCount = ref(0)
 const zonesError = ref('')
-const temperature = ref<number | null>(null)
-const temperatureAvailable = ref(false)
+const weather = ref<CbdWeather | null>(null)
 const locating = ref(false)
 const locationError = ref('')
 const growing = ref(false)
@@ -140,13 +139,7 @@ const mapRouteOptions = computed<RouteOption[]>(() => {
 })
 
 async function loadWeather() {
-  try {
-    const result = await getCbdWeather()
-    temperature.value = result.temperatureCelsius
-    temperatureAvailable.value = result.available
-  } catch {
-    temperatureAvailable.value = false
-  }
+  weather.value = await getCbdWeather()
 }
 
 onMounted(() => {
@@ -172,7 +165,7 @@ const sproutLine = computed(() => {
     case 'shade':
       return thermalChoice.value
         ? thermalReply(thermalChoice.value)
-        : temperaturePrompt(temperature.value)
+        : temperaturePrompt(weather.value)
     case 'journey': {
       const noise = noiseReply(journey.preferences.noise)
       const allergy = allergyReply(journey.preferences.allergy)
@@ -598,10 +591,8 @@ watch(
           <section v-else-if="sprout.step === 'shade'" class="sprout-step">
             <span class="eyebrow">STEP 3 · SHADE AND THERMAL COMFORT</span>
             <div class="step-heading-row">
-              <h2>{{ temperaturePrompt(temperatureAvailable ? temperature : null) }}</h2>
-              <span v-if="temperatureAvailable && temperature !== null" class="temp-chip"
-                >CBD now · {{ temperature }}°C</span
-              >
+              <h2>{{ temperaturePrompt(weather) }}</h2>
+              <span v-if="weather" class="temp-chip">CBD now · {{ weather.temperatureC }}°C</span>
             </div>
             <div class="option-grid" role="group" aria-label="Shade and thermal comfort">
               <button

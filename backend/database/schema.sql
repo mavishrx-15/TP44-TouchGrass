@@ -55,8 +55,11 @@ CREATE TABLE tree_pins (
     accuracy_m DOUBLE PRECISION NOT NULL,
     photo_data TEXT,
     photo_status TEXT NOT NULL DEFAULT 'pending',
+    device_id TEXT,
     created_at TEXT NOT NULL
 );
+
+CREATE INDEX idx_tree_pins_device ON tree_pins(device_id, created_at);
 
 CREATE TABLE tree_messages (
     id TEXT PRIMARY KEY,
@@ -64,6 +67,27 @@ CREATE TABLE tree_messages (
     zone_id TEXT REFERENCES zones(cluster_id),
     body TEXT NOT NULL,
     kind TEXT NOT NULL,
+    device_id TEXT,
     status TEXT NOT NULL DEFAULT 'pending',
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX idx_tree_messages_device ON tree_messages(device_id, created_at);
+
+-- GET /api/weather/now's 30-minute cache (Epic 5).
+CREATE TABLE weather_readings (
+    id TEXT PRIMARY KEY,
+    observed_at TEXT NOT NULL,
+    temperature_c DOUBLE PRECISION NOT NULL,
+    source TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX idx_weather_readings_observed_at ON weather_readings(observed_at);
+
+-- Proves a device_id belongs to whoever first used it, so a tree pin or
+-- message can't be posted under someone else's device_id (Epic 7 hardening).
+CREATE TABLE device_credentials (
+    device_id TEXT PRIMARY KEY,
+    credential_hash TEXT NOT NULL,
     created_at TEXT NOT NULL
 );
