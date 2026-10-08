@@ -25,7 +25,8 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:5173"
     database_url: str = ""
     google_maps_api_key: str = ""
-    posts_per_device_per_hour: int = Field(default=10, ge=1, le=1000)
+    # Zero explicitly disables the posting limit for local testing.
+    posts_per_device_per_hour: int = Field(default=10, ge=0, le=1000)
     access_password: str = ""
     access_token_secret: str = ""
     # Shared secret for approving public tree messages and photos (Epic 7).

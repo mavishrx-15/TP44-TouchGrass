@@ -16,8 +16,8 @@ Publishing rules, from the Epic 7 acceptance criteria:
 
 - Messages and photos from anyone are hidden until an admin approves them.
   Public reads only ever return approved rows.
-- Damage reports are never public. They are stored for the council and are
-  not shown in any area listing.
+- Damage reports can appear alongside messages only after admin approval.
+  Saving a report does not submit it to the council; the visitor shares it separately.
 - Review endpoints need the X-Care-Admin header to match CARE_ADMIN_TOKEN. If
   that setting is empty, nobody can approve, so nothing goes public by mistake.
 - No account is needed. The pin, photo and message are the whole record.
@@ -130,6 +130,7 @@ class PublicPin(CamelModel):
 
 class PublicMessage(CamelModel):
     id: str
+    kind: Literal["message", "damage_report"]
     body: str
     created_at: str
     pin: PublicPin
@@ -202,6 +203,8 @@ def _require_pin_owner(pin_device_id: str | None, device_id: str) -> None:
 
 
 def _rate_limit(session, device_id: str) -> None:
+    if settings.posts_per_device_per_hour == 0:
+        return
     since = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
     count = session.execute(
         text(
@@ -382,11 +385,12 @@ def approved_messages(
     rows = session.execute(
         text(
             """
-            SELECT m.id, m.body, m.created_at, p.latitude, p.longitude,
+            SELECT m.id, m.kind, m.body, m.created_at, p.latitude, p.longitude,
                    CASE WHEN p.photo_status = 'approved' THEN p.photo_data END AS photo_data
             FROM tree_messages m
             JOIN tree_pins p ON p.id = m.pin_id
-            WHERE m.zone_id = :zone AND m.status = 'approved' AND m.kind = 'message'
+            WHERE m.zone_id = :zone AND m.status = 'approved'
+              AND m.kind IN ('message', 'damage_report')
             ORDER BY m.created_at DESC
             LIMIT :limit
             """
@@ -396,6 +400,7 @@ def approved_messages(
     return [
         PublicMessage(
             id=row.id,
+            kind=row.kind,
             body=row.body,
             created_at=row.created_at,
             pin=PublicPin(latitude=row.latitude, longitude=row.longitude),

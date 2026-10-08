@@ -1,7 +1,13 @@
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { defineStore } from 'pinia'
 import type { Mood } from '@/data/sproutMessages'
-import { EMPTY_REWARDS, recordVisit, type RewardsState } from '@/services/rewards.logic'
+import {
+  recordVisit,
+  restoreRewards,
+  unlockSkin,
+  type RewardsState,
+} from '@/services/rewards.logic'
+import { getSkin, SPROUT_SKINS, type SkinId } from '@/data/sproutSkins'
 
 /**
  * Leaf points and visits (Epic 8). Saved in localStorage so it survives a reload
@@ -14,14 +20,9 @@ const STORAGE_KEY = 'touchgrass.rewards.v1'
 function load(): RewardsState {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return { ...EMPTY_REWARDS, visits: [] }
-    const parsed = JSON.parse(raw) as Partial<RewardsState>
-    return {
-      points: Number.isFinite(parsed.points) ? Number(parsed.points) : 0,
-      visits: Array.isArray(parsed.visits) ? parsed.visits : [],
-    }
+    return restoreRewards(raw ? JSON.parse(raw) : null)
   } catch {
-    return { ...EMPTY_REWARDS, visits: [] }
+    return restoreRewards(null)
   }
 }
 
@@ -36,7 +37,23 @@ function save(state: RewardsState): void {
 export const useRewardsStore = defineStore('rewards', () => {
   const state = ref<RewardsState>(load())
 
-  watch(state, save, { deep: true })
+  watch(state, save, { deep: true, flush: 'sync' })
+  const ownedSkins = computed(() => state.value.ownedSkins ?? ['classic'])
+  const equippedSkin = computed(() => state.value.equippedSkin ?? 'classic')
+  const wearing = computed(() => getSkin(equippedSkin.value))
+  const hasLockedSkins = computed(() =>
+    SPROUT_SKINS.some((skin) => !ownedSkins.value.includes(skin.id)),
+  )
+
+  function unlock(id: SkinId) {
+    const result = unlockSkin(state.value, id)
+    state.value = result.state
+    return result.unlocked
+  }
+
+  function wear(id: SkinId) {
+    if (ownedSkins.value.includes(id)) state.value.equippedSkin = id
+  }
 
   function logVisit(input: {
     zoneId: string
@@ -50,5 +67,5 @@ export const useRewardsStore = defineStore('rewards', () => {
     return result
   }
 
-  return { state, logVisit }
+  return { state, logVisit, ownedSkins, equippedSkin, wearing, hasLockedSkins, unlock, wear }
 })

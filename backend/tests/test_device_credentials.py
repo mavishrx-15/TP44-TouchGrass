@@ -3,11 +3,18 @@ isn't yours, and a device can't flood the area with posts.
 """
 
 from app.config import settings
+from app.routers.care import _rate_limit
 
 PHOTO = "data:image/jpeg;base64,/9j/4AAQSkZJRg=="
 ZONE = "-37.795_144.915"
 DEVICE = "device-0000001"
 OTHER_DEVICE = "device-0000002"
+
+
+def test_zero_disables_the_local_posting_limit(monkeypatch):
+    monkeypatch.setattr(settings, "posts_per_device_per_hour", 0)
+    # No count query is needed when local testing has no posting limit.
+    _rate_limit(None, DEVICE)
 
 
 def _pin_body(**overrides):

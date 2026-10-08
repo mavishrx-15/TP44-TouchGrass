@@ -4,6 +4,7 @@
  * chosen from the walk's own state, not generated.
  */
 import type { Mood } from '@/data/sproutMessages'
+import { ApiError } from '@/api/client'
 
 export const BEYOND_BLUE = { label: 'Beyond Blue', number: '1300 22 4636' } as const
 
@@ -58,9 +59,9 @@ export const PHOTO_GUIDE = 'Fit your tree inside the frame'
 export const PHOTO_DONE = 'What a beauty! Want to leave it a message?'
 export const CAMERA_BLOCKED =
   'I can’t reach your camera. You can still pick a photo from your Photos, or carry on without one.'
-export const POSTED_TEXT = 'Posted! Other visitors to this area will see your message.'
+export const POSTED_TEXT = 'Saved! Other visitors can see your message after it has been reviewed.'
 export const REPORT_SENT_TEXT =
-  'Thank you for looking out for it. Your pin and photo make it easy for the council to find.'
+  'Thank you for looking out for it. Your report is saved. You can now share it with the council.'
 export const SAVED_NOTE =
   'Saved in TouchGrass with your pin and photo. Photos are checked before other visitors can see them.'
 export const THANKS_CHIP = 'Thanks for the shade'
@@ -137,6 +138,19 @@ export function checkInReply(direction: 'down' | 'same' | 'up'): string {
  * Our own plain messages (for example "That photo is too large") pass through.
  */
 export function friendlyError(error: unknown, fallback: string): string {
+  if (error instanceof ApiError) {
+    if (error.status === 401)
+      return 'Your session has expired. Enter the access password and try again.'
+    if (error.status === 403)
+      return 'This device could not be verified. Please reload the page and try again.'
+    if (error.status === 404)
+      return 'This area is no longer available. Grow a new route and try again.'
+    if (error.status === 429)
+      return 'You’ve made a few posts recently. Please wait before trying again.'
+    if (error.status === 422)
+      return 'The pin details could not be saved. Try getting a new location fix.'
+    return fallback
+  }
   const geo = error as Partial<GeolocationPositionError> | null
   if (geo && typeof geo === 'object' && typeof geo.code === 'number' && !(error instanceof Error)) {
     if (geo.code === 1)

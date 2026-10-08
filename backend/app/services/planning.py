@@ -1,6 +1,8 @@
 """Route planning for Sprout: choose a destination, then a route to it.
 
-The backend picks the destination, not the browser (design doc, section 2).
+The backend picks the destination by default (design doc, section 2).
+An explicit recommendation pick supplies destinationZoneId, restricting the
+same citywide planner to that zone without falling back to another area.
 That is what fixes the old bugs: a 20+ min choice getting a 7 min walk, pollen
 never changing which route was picked, and a State Library start being sent to
 a one-zone precinct.
@@ -41,6 +43,7 @@ from app.schemas.planning import (
     PlanningRequest,
     PreferenceMatch,
     Preferences,
+    RoutePlanningRequest,
     RouteStep,
 )
 from app.services import sprout
@@ -95,10 +98,16 @@ class Option:
         return float(self.route["duration"].removesuffix("s")) / 60
 
 
-def plan_route(request: PlanningRequest, session: Session) -> PlannedRoute:
+def plan_route(request: PlanningRequest | RoutePlanningRequest, session: Session) -> PlannedRoute:
     origin, preferences = request.origin, request.preferences
 
-    ranked = _ranked(origin, preferences, repository.candidate_zones(session))
+    zones = repository.candidate_zones(session)
+    selected_id = getattr(request, "destinationZoneId", None)
+    if selected_id is not None:
+        zones = [zone for zone in zones if zone.id == selected_id]
+        if not zones:
+            raise HTTPException(status_code=404, detail="The selected area is no longer available.")
+    ranked = _ranked(origin, preferences, zones)
     if not ranked:
         raise HTTPException(status_code=404, detail="No tree-dense area was found.")
 

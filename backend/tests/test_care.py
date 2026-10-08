@@ -1,7 +1,7 @@
 """Epic 7 acceptance tests: pins, photos, messages, damage reports and approval.
 
 Pinned to the acceptance criteria rather than the implementation: a message is
-hidden until approved, a damage report is never public, and an unapproved
+hidden until approved, a damage report needs approval, and an unapproved
 photo is never returned with an approved message.
 """
 
@@ -154,17 +154,25 @@ def test_rejected_message_never_appears(client, monkeypatch):
     assert client.get(f"/api/care/zones/{ZONE}/messages").json() == []
 
 
-def test_damage_report_is_never_public_even_when_approved(client, monkeypatch):
+def test_damage_report_is_public_only_after_approval(client, monkeypatch):
     _admin_settings(monkeypatch)
     pin = _pin(client)
     report = _message(
         client, pin, body="Large branch hanging over the path", kind="damage_report"
     ).json()
     assert report["kind"] == "damage_report"
+    assert client.get(f"/api/care/zones/{ZONE}/messages").json() == []
     client.post(
         f"/api/care/messages/{report['id']}/review", json={"status": "approved"}, headers=ADMIN
     )
-    assert client.get(f"/api/care/zones/{ZONE}/messages").json() == []
+    public = client.get(f"/api/care/zones/{ZONE}/messages").json()
+    assert len(public) == 1
+    assert public[0]["kind"] == "damage_report"
+    assert public[0]["photoDataUrl"] is None
+    client.post(
+        f"/api/care/pins/{pin['id']}/photo/review", json={"status": "approved"}, headers=ADMIN
+    )
+    assert client.get(f"/api/care/zones/{ZONE}/messages").json()[0]["photoDataUrl"] == PHOTO
 
 
 def test_empty_message_is_rejected(client):

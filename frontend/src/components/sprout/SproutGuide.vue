@@ -693,6 +693,7 @@ watch(
   flex: 1;
   display: flex;
   flex-direction: column;
+  min-height: 0;
   font-family: var(--sp-sans);
   color: var(--sp-ink);
   background: var(--sp-cream);
@@ -792,6 +793,7 @@ h2 {
 
 /* Stepper */
 .sprout-progress {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -1091,8 +1093,7 @@ fieldset legend {
 .map-mode {
   position: relative;
   display: block;
-  height: calc(100vh - 150px);
-  min-height: 640px;
+  min-height: 0;
   overflow: hidden;
 }
 .map-stage {
@@ -1169,7 +1170,7 @@ fieldset legend {
   left: 22px;
   top: 58px;
   z-index: 2;
-  width: min(400px, calc(100% - 44px));
+  width: min(360px, calc(100% - 44px));
   max-height: calc(100% - 300px);
   overflow-y: auto;
   background: var(--sp-cream);
@@ -1394,7 +1395,7 @@ fieldset legend {
   }
   .map-stage {
     position: relative;
-    height: 380px;
+    height: max(380px, 48dvh);
   }
   .float-card,
   .bubble-anchor {

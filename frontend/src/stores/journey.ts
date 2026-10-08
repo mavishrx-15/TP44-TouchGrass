@@ -13,6 +13,8 @@ import {
 } from '@/services/personalisation.service'
 import { findAreas, growRoute } from '@/services/planning.service'
 import { preferenceChips } from '@/services/preferences'
+import { friendlyError } from '@/data/walkMessages'
+import { ApiError } from '@/api/client'
 
 // Fixture destinations must not leak into a live-data session.
 const STORAGE_KEY = USE_MOCK_DATA ? 'touchgrass.journey.v2' : 'touchgrass.journey.live.v1'
@@ -72,9 +74,11 @@ export const useJourneyStore = defineStore('journey', () => {
   const sproutAreas = ref<AreaOption[]>([])
   const sproutAreasLoading = ref(false)
   const sproutAreasError = ref<string | null>(null)
+  let areasSequence = 0
 
   /** Grows Sprout's route. The backend chooses the destination; this sets it from the response. */
-  async function growSproutRoute(): Promise<boolean> {
+  async function growSproutRoute(destinationZoneId?: string): Promise<boolean> {
+    if (sproutRouteLoading.value) return false
     if (!startLocation.value) {
       sproutRouteError.value = 'Choose a starting location first.'
       return false
@@ -82,7 +86,12 @@ export const useJourneyStore = defineStore('journey', () => {
     sproutRouteLoading.value = true
     sproutRouteError.value = null
     try {
-      const result = await growRoute(startLocation.value.coordinates, preferences.value)
+      const result = await growRoute(
+        startLocation.value.coordinates,
+        preferences.value,
+        undefined,
+        destinationZoneId,
+      )
       sproutRoute.value = result
       destination.value = {
         id: result.destination.zoneId,
@@ -91,7 +100,10 @@ export const useJourneyStore = defineStore('journey', () => {
       }
       return true
     } catch (e) {
-      sproutRouteError.value = e instanceof Error ? e.message : 'The route could not be calculated.'
+      const fallback =
+        'The next route could not be loaded. Try this area again or choose another nearby area.'
+      sproutRouteError.value =
+        e instanceof ApiError && e.status !== 401 ? fallback : friendlyError(e, fallback)
       return false
     } finally {
       sproutRouteLoading.value = false
@@ -103,17 +115,20 @@ export const useJourneyStore = defineStore('journey', () => {
     options: { excludedZoneIds?: string[]; limit?: number } = {},
   ): Promise<AreaOption[]> {
     if (!startLocation.value) return []
+    const request = ++areasSequence
     sproutAreasLoading.value = true
     sproutAreasError.value = null
     try {
       const result = await findAreas(startLocation.value.coordinates, preferences.value, options)
+      if (request !== areasSequence) return []
       sproutAreas.value = result.areas
       return result.areas
     } catch (e) {
-      sproutAreasError.value = e instanceof Error ? e.message : 'Areas could not be loaded.'
+      if (request === areasSequence)
+        sproutAreasError.value = e instanceof Error ? e.message : 'Areas could not be loaded.'
       return []
     } finally {
-      sproutAreasLoading.value = false
+      if (request === areasSequence) sproutAreasLoading.value = false
     }
   }
 

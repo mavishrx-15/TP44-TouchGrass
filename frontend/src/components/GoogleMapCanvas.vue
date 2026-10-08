@@ -32,7 +32,12 @@ const props = defineProps<{
   // Epic 6: the user's live position, drawn as a blue dot.
   userPosition?: Coordinates | null
   // Epic 7: approved messages from other visitors, shown as pins.
-  messagePins?: { id: string; position: Coordinates; label: string }[]
+  messagePins?: {
+    id: string
+    position: Coordinates
+    label: string
+    kind?: 'message' | 'damage_report'
+  }[]
 }>()
 
 const emit = defineEmits<{
@@ -301,6 +306,10 @@ async function renderMessagePins() {
     const content = document.createElement('button')
     content.type = 'button'
     content.className = 'care-pin'
+    if (pin.kind === 'damage_report') {
+      content.style.backgroundColor = '#b77930'
+      content.textContent = '⚑'
+    }
     content.title = pin.label
     content.setAttribute('aria-label', pin.label)
     content.addEventListener('click', () => emit('selectMessage', pin.id))

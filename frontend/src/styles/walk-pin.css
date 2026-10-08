@@ -1,0 +1,360 @@
+.pin-flow {
+  display: grid;
+  gap: 18px;
+  min-width: 0;
+}
+.pin-flow :is(h2, h3) {
+  margin: 0;
+  font:
+    700 1.45rem/1.25 'Fraunces',
+    Georgia,
+    serif;
+  color: var(--walk-ink);
+}
+.eyebrow {
+  font-size: 0.64rem;
+  font-weight: 750;
+  letter-spacing: 0.12em;
+  color: #1f5a2c;
+}
+.pin-note {
+  margin: 0;
+  font-size: 0.88rem;
+  line-height: 1.65;
+  color: var(--walk-muted);
+}
+.pin-step,
+.flow-card,
+.photo-step,
+.report,
+.report-handoff {
+  display: grid;
+  gap: 16px;
+  padding: 22px;
+  border: 1px solid var(--walk-line);
+  border-radius: 22px;
+  background: var(--walk-paper);
+}
+.pin-step > .primary-button {
+  width: 100%;
+  margin-top: 4px;
+}
+.pin-card {
+  border: 1.5px solid #cfdcc1;
+  border-radius: 18px;
+  padding: 16px;
+  background: #f1f6ea;
+}
+.pin-card-heading {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+}
+.pin-card-heading > div {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+.pin-card-heading strong {
+  font-size: 0.94rem;
+  color: var(--walk-ink);
+}
+.pin-status-icon {
+  width: 42px;
+  height: 42px;
+  border-radius: 13px;
+  flex-shrink: 0;
+  background: #fffefb;
+  color: #477c40;
+  display: grid;
+  place-items: center;
+  font-size: 22px;
+}
+.pin-thumb-img {
+  width: 52px;
+  height: 56px;
+  border-radius: 12px;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+.coords {
+  margin: 10px 0 4px;
+  font-size: 0.83rem;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.accuracy {
+  margin: 0;
+  color: #6b7965;
+  font-size: 0.76rem;
+  line-height: 1.5;
+}
+.location-details {
+  margin-top: 12px;
+  border-top: 1px solid #dae4d1;
+  padding-top: 10px;
+}
+summary {
+  cursor: pointer;
+  color: #1f5a2c;
+  font-size: 0.8rem;
+  font-weight: 650;
+  padding: 4px 0;
+}
+.pinned-actions {
+  gap: 12px;
+}
+.pinned-actions .pin-note {
+  margin-bottom: 6px;
+}
+.row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.weak {
+  display: grid;
+  gap: 12px;
+  border: 1px solid #ead8b8;
+  background: #faf4e5;
+  padding: 14px;
+  border-radius: 14px;
+  color: #83622f;
+  font-size: 0.84rem;
+  line-height: 1.55;
+}
+.weak p {
+  margin: 0;
+}
+.section-heading {
+  display: grid;
+  gap: 10px;
+}
+.message-step {
+  min-width: 0;
+}
+.compose-card {
+  gap: 12px;
+}
+.field-label {
+  margin: 6px 0 0;
+  font-size: 0.83rem;
+  font-weight: 650;
+}
+textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 140px;
+  border: 1px solid #d4ded0;
+  border-radius: 14px;
+  padding: 14px;
+  background: #fcfcf8;
+  font:
+    400 16px/1.6 'Figtree',
+    system-ui,
+    sans-serif;
+  color: var(--walk-ink);
+  resize: vertical;
+}
+textarea::placeholder {
+  color: #90998c;
+}
+.message-count {
+  justify-self: end;
+  color: #88917f;
+  font-size: 0.72rem;
+  margin-top: -5px;
+}
+.chips-row {
+  margin: 0;
+  gap: 8px;
+}
+.chip {
+  background: #f0f4e9;
+  color: #526e44;
+  border: 1px solid #cfdcc1;
+  border-radius: 999px;
+  padding: 10px 12px;
+  min-height: 44px;
+  text-align: left;
+  font:
+    650 0.78rem/1.4 'Figtree',
+    system-ui,
+    sans-serif;
+  cursor: pointer;
+}
+.compose-card .add-photo {
+  justify-self: start;
+}
+.compose-card .row:has(.primary-button) .primary-button {
+  width: 100%;
+}
+.saved-note {
+  margin: 0;
+  font-size: 0.72rem;
+  color: #829078;
+  line-height: 1.55;
+}
+.report {
+  border-color: #e9d3b7;
+}
+.report-description {
+  margin: 0;
+  padding: 16px;
+  border-left: 3px solid #b5bf8b;
+  border-radius: 0 12px 12px 0;
+  background: #f6f5ea;
+  color: #495a3b;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+  font-size: 0.94rem;
+  white-space: pre-wrap;
+}
+dl {
+  display: grid;
+  grid-template-columns: minmax(88px, 0.7fr) minmax(0, 1.3fr);
+  gap: 12px 16px;
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  padding: 4px 0 10px;
+}
+dt {
+  font-weight: 550;
+  color: var(--walk-muted);
+}
+dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.report > .row {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+.report > .row .text-button {
+  justify-self: center;
+}
+.posted-step {
+  display: grid;
+  gap: 18px;
+}
+.report-handoff,
+.message-success {
+  text-align: center;
+  justify-items: center;
+}
+.report-handoff > p {
+  margin: 0;
+  color: var(--walk-muted);
+  font-size: 0.88rem;
+  line-height: 1.65;
+}
+.success-mark {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: #e8f0df;
+  color: #4f7c3c;
+  font-size: 1.4rem;
+}
+.handoff-details {
+  text-align: left;
+  width: 100%;
+  border-top: 1px solid var(--walk-line);
+  padding-top: 10px;
+  margin-top: 4px;
+}
+.handoff-details summary {
+  padding: 10px 2px;
+}
+.handoff-details p {
+  font-size: 0.8rem;
+  color: var(--walk-muted);
+  line-height: 1.6;
+}
+.council-link {
+  display: inline-flex;
+  color: var(--walk-green);
+  font-size: 0.83rem;
+  font-weight: 600;
+  margin: 0 0 14px;
+  line-height: 1.5;
+}
+.handoff-details .row .primary-button {
+  flex: 1 1 100%;
+}
+.handoff-details .ghost-button {
+  flex: 1;
+}
+.posted-actions {
+  flex-direction: column-reverse;
+  align-items: stretch;
+}
+.my-messages {
+  border: 1px solid var(--walk-line);
+  background: var(--walk-paper);
+  border-radius: 16px;
+  padding: 12px 16px;
+}
+.my-messages summary {
+  color: #63715c;
+}
+.my-messages summary span {
+  margin-left: 8px;
+  background: #edf2e6;
+  border-radius: 6px;
+  padding: 2px 6px;
+}
+.my-messages ul {
+  list-style: none;
+  padding: 0;
+  margin: 14px 0 0;
+  display: grid;
+  gap: 12px;
+}
+.my-messages li {
+  padding: 12px 0 0;
+  border-top: 1px solid var(--walk-line);
+}
+.my-messages p {
+  margin: 8px 0 4px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+  font-size: 0.85rem;
+}
+.my-messages small {
+  color: #8b9484;
+  font-size: 0.7rem;
+}
+.tag {
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  border-radius: 6px;
+  padding: 4px 7px;
+  background: #ecf3e5;
+  color: #536a43;
+}
+.report-tag {
+  background: #f6ecdb;
+  color: #8b6936;
+}
+.skip {
+  justify-self: center;
+}
+@media (max-width: 380px) {
+  .pin-step,
+  .flow-card,
+  .photo-step,
+  .report,
+  .report-handoff {
+    padding: 18px;
+  }
+  .pin-card-heading strong {
+    font-size: 0.85rem;
+  }
+}

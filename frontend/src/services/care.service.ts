@@ -1,5 +1,10 @@
-import { apiGet, apiPost, apiPut } from '@/api/client'
-import { getDeviceId, getDeviceToken, saveDeviceToken } from '@/services/device.service'
+import { apiGet, apiPost, apiPut, ApiError } from '@/api/client'
+import {
+  getDeviceId,
+  getDeviceToken,
+  saveDeviceToken,
+  resetDeviceCredentials,
+} from '@/services/device.service'
 
 /**
  * Epic 7 API client. Matches the contract at the top of backend/app/routers/care.py.
@@ -35,6 +40,7 @@ export interface CareMessage {
 
 export interface PublicMessage {
   id: string
+  kind: 'message' | 'damage_report'
   body: string
   createdAt: string
   pin: { latitude: number; longitude: number }
@@ -59,13 +65,29 @@ export async function createPin(input: {
   accuracyM: number
   photoDataUrl: string | null
 }): Promise<CarePin> {
-  const result = await apiPost<CarePin>(
-    '/api/care/pins',
-    { ...input, deviceId: getDeviceId() },
-    undefined,
-    deviceHeaders(),
-  )
-  return keepAnyIssuedToken(result)
+  const post = () =>
+    apiPost<CarePin>(
+      '/api/care/pins',
+      { ...input, deviceId: getDeviceId() },
+      undefined,
+      deviceHeaders(),
+    )
+  try {
+    return keepAnyIssuedToken(await post())
+  } catch (error) {
+    const detail =
+      error instanceof ApiError ? (error.detail as { detail?: unknown } | undefined) : undefined
+    if (
+      !(error instanceof ApiError) ||
+      error.status !== 403 ||
+      detail?.detail !== 'Invalid device credential.'
+    )
+      throw error
+    // A new pin has no owner yet, so a lost credential can safely be replaced.
+    // Photo/message mutations never replace credentials or retry an ownership failure.
+    resetDeviceCredentials()
+    return keepAnyIssuedToken(await post())
+  }
 }
 
 export async function updatePinPhoto(pinId: string, photoDataUrl: string): Promise<CarePin> {

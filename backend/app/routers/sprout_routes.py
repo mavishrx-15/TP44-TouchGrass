@@ -3,14 +3,14 @@
 from fastapi import APIRouter
 
 from app.db import SessionDep
-from app.schemas.planning import AreasRequest, AreasResponse, PlannedRoute, PlanningRequest
+from app.schemas.planning import AreasRequest, AreasResponse, PlannedRoute, RoutePlanningRequest
 from app.services import planning
 
 router = APIRouter(prefix="/sprout", tags=["Iteration 3 planning"])
 
 
 @router.post("/route", response_model=PlannedRoute)
-def grow_route(request: PlanningRequest, session: SessionDep) -> PlannedRoute:
+def grow_route(request: RoutePlanningRequest, session: SessionDep) -> PlannedRoute:
     return planning.plan_route(request, session)
 
 

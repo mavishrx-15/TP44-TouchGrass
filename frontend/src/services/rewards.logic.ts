@@ -4,6 +4,7 @@
  * never touches storage or the network.
  */
 import type { Mood } from '@/data/sproutMessages'
+import { isSkinId, SKIN_COST, type SkinId } from '@/data/sproutSkins'
 
 export const POINTS_PER_WALK = 5
 export const CANOPY_FRIEND_VISITS = 3
@@ -25,9 +26,60 @@ export interface Visit {
 export interface RewardsState {
   points: number
   visits: Visit[]
+  ownedSkins?: SkinId[]
+  equippedSkin?: SkinId
 }
 
 export const EMPTY_REWARDS: RewardsState = { points: 0, visits: [] }
+
+/** Existing v1 saves keep their points and visits when the wardrobe is added. */
+export function restoreRewards(value: unknown): RewardsState {
+  const saved = value && typeof value === 'object' ? (value as Partial<RewardsState>) : {}
+  const ownedSkins: SkinId[] = [
+    ...new Set<SkinId>([
+      'classic',
+      ...(Array.isArray(saved.ownedSkins) ? saved.ownedSkins.filter(isSkinId) : []),
+    ]),
+  ]
+  return {
+    points:
+      typeof saved.points === 'number' && Number.isFinite(saved.points)
+        ? Math.max(0, Math.floor(saved.points))
+        : 0,
+    visits: Array.isArray(saved.visits)
+      ? saved.visits.filter(
+          (visit) =>
+            visit &&
+            typeof visit.zoneId === 'string' &&
+            typeof visit.date === 'string' &&
+            Number.isFinite(Date.parse(visit.at)),
+        )
+      : [],
+    ownedSkins,
+    equippedSkin:
+      isSkinId(saved.equippedSkin) && ownedSkins.includes(saved.equippedSkin)
+        ? saved.equippedSkin
+        : 'classic',
+  }
+}
+
+export function unlockSkin(
+  state: RewardsState,
+  id: SkinId,
+): { state: RewardsState; unlocked: boolean } {
+  const owned = state.ownedSkins ?? ['classic']
+  if (!isSkinId(id) || owned.includes(id) || state.points < SKIN_COST)
+    return { state, unlocked: false }
+  return {
+    state: {
+      ...state,
+      points: state.points - SKIN_COST,
+      ownedSkins: [...owned, id],
+      equippedSkin: id,
+    },
+    unlocked: true,
+  }
+}
 
 export function dayKey(date: Date): string {
   const pad = (n: number) => String(n).padStart(2, '0')

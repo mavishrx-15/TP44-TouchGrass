@@ -50,6 +50,7 @@ export interface MatchSummary {
   sentence: string
 }
 export interface PersonalisedRoute extends RouteOption {
+  denseZoneShare?: number | null
   travelMode: TravelMode
   match: MatchSummary | null
   metrics: AreaMetrics | null

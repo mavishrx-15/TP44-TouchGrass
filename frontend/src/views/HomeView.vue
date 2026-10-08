@@ -19,22 +19,40 @@ onMounted(initialize)
 </script>
 
 <template>
-  <JourneyHeader />
-  <DemoNotice />
-  <main id="main-content" tabindex="-1" class="home-page">
-    <p v-if="initError" class="form-error" role="alert">
-      {{ initError }}
-      <button type="button" class="text-button" @click="initialize">Retry</button>
-    </p>
-    <SproutGuide />
-  </main>
+  <div class="home-shell">
+    <JourneyHeader />
+    <DemoNotice />
+    <main id="main-content" tabindex="-1" class="home-page">
+      <p v-if="initError" class="form-error" role="alert">
+        {{ initError }}
+        <button type="button" class="text-button" @click="initialize">Retry</button>
+      </p>
+      <SproutGuide />
+    </main>
+  </div>
 </template>
 
 <style scoped>
-.home-page {
-  min-height: calc(100vh - 64px);
+.home-shell {
+  min-height: 100dvh;
   display: flex;
   flex-direction: column;
+}
+.home-shell :deep(.journey-header),
+.home-shell :deep(.demo-notice) {
+  flex-shrink: 0;
+}
+.home-page {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+@media (min-width: 801px) {
+  .home-shell:has(.map-mode) {
+    height: 100dvh;
+    overflow: hidden;
+  }
 }
 .form-error {
   color: #b44235;

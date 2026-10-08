@@ -8,10 +8,30 @@ import BlindModeToggle from './BlindModeToggle.vue'
     <RouterLink class="journey-brand" to="/" aria-label="TouchGrass home"
       ><span><LeafIcon /></span>TouchGrass</RouterLink
     >
-    <BlindModeToggle />
+    <div class="header-actions">
+      <RouterLink class="rewards-link" to="/rewards">Leaf rewards</RouterLink><BlindModeToggle />
+    </div>
   </header>
 </template>
 <style scoped>
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.rewards-link {
+  color: #1f5a2c;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+@media (max-width: 640px) {
+  .header-actions {
+    gap: 10px;
+  }
+  .header-actions :deep(.look-picker) {
+    display: none;
+  }
+}
 .journey-header {
   height: 64px;
   display: flex;

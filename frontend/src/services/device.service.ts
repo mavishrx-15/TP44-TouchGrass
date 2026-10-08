@@ -7,34 +7,54 @@
  */
 const DEVICE_ID_KEY = 'touchgrass.device.id'
 const DEVICE_TOKEN_KEY = 'touchgrass.device.token'
+let memoryId: string | null = null
+let memoryToken: string | null = null
+let storageUnavailable = false
 
 export function getDeviceId(): string {
+  if (storageUnavailable) return (memoryId ??= crypto.randomUUID())
   try {
     let id = localStorage.getItem(DEVICE_ID_KEY)
     if (!id) {
       id = crypto.randomUUID()
       localStorage.setItem(DEVICE_ID_KEY, id)
     }
+    memoryId = id
     return id
   } catch {
-    // Storage unavailable (private browsing, etc.) - a one-off id still lets
-    // this single post succeed, it just won't be recognised as returning.
-    return crypto.randomUUID()
+    storageUnavailable = true
+    return (memoryId ??= crypto.randomUUID())
   }
 }
 
 export function getDeviceToken(): string | null {
+  if (storageUnavailable) return memoryToken
   try {
-    return localStorage.getItem(DEVICE_TOKEN_KEY)
+    memoryToken = localStorage.getItem(DEVICE_TOKEN_KEY)
+    return memoryToken
   } catch {
-    return null
+    storageUnavailable = true
+    return memoryToken
   }
 }
 
 export function saveDeviceToken(token: string): void {
+  memoryToken = token
   try {
     localStorage.setItem(DEVICE_TOKEN_KEY, token)
   } catch {
-    /* Credential persistence is optional - it still works for this post. */
+    storageUnavailable = true
+  }
+}
+
+/** Start a new anonymous identity after a lost credential; existing pins stay owned by the old one. */
+export function resetDeviceCredentials(): void {
+  memoryId = crypto.randomUUID()
+  memoryToken = null
+  try {
+    localStorage.setItem(DEVICE_ID_KEY, memoryId)
+    localStorage.removeItem(DEVICE_TOKEN_KEY)
+  } catch {
+    storageUnavailable = true
   }
 }
