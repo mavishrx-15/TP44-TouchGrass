@@ -1,23 +1,29 @@
 """Walking routes backed by Google Routes and scored against local tree zones."""
 
 from math import asin, cos, radians, sin, sqrt
+from threading import Lock
+from time import monotonic
 
 import httpx
-from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
 from sqlalchemy import text
 
 from app.config import settings
+from app.cbd import polygon, require_inside
 from app.db import SessionDep
+from app.security import optional_access_token
 
 router = APIRouter()
 EARTH_RADIUS_M = 6_371_000
 TREE_CORRIDOR_M = 100
+_reroute_lock = Lock()
+_last_route_by_token: dict[str, float] = {}
 
 
 class Coordinates(BaseModel):
-    lat: float
-    lng: float
+    lat: float = Field(ge=-90, le=90)
+    lng: float = Field(ge=-180, le=180)
 
 
 class RouteRequest(BaseModel):
@@ -32,6 +38,7 @@ class RouteResult(BaseModel):
     distanceKm: float
     treeCount: int
     encodedPolyline: str
+    steps: list[dict] = Field(default_factory=list)
 
 
 class PlaceSuggestion(BaseModel):
@@ -52,10 +59,10 @@ def autocomplete_places(query: str = Query(min_length=2, max_length=120)) -> lis
         "input": query,
         "includedRegionCodes": ["au"],
         "languageCode": "en-AU",
-        "locationBias": {
-            "circle": {
-                "center": {"latitude": -37.8136, "longitude": 144.9631},
-                "radius": 50_000,
+        "locationRestriction": {
+            "rectangle": {
+                "low": {"latitude": min(p[1] for p in polygon()), "longitude": min(p[0] for p in polygon())},
+                "high": {"latitude": max(p[1] for p in polygon()), "longitude": max(p[0] for p in polygon())},
             }
         },
     }
@@ -65,13 +72,17 @@ def autocomplete_places(query: str = Query(min_length=2, max_length=120)) -> lis
         field_mask="suggestions.placePrediction.placeId,suggestions.placePrediction.text.text",
         json=payload,
     )
-    return [
-        PlaceSuggestion(
-            id=item["placePrediction"]["placeId"], label=item["placePrediction"]["text"]["text"]
-        )
-        for item in data.get("suggestions", [])
-        if "placePrediction" in item
-    ]
+    result = []
+    for item in data.get("suggestions", []):
+        prediction = item.get("placePrediction")
+        if not prediction:
+            continue
+        place_id = prediction["placeId"]
+        detail = _google_request("GET", f"https://places.googleapis.com/v1/places/{place_id}", "location")
+        location = detail.get("location", {})
+        if location and _inside(location["latitude"], location["longitude"]):
+            result.append(PlaceSuggestion(id=place_id, label=prediction["text"]["text"]))
+    return result
 
 
 @router.get("/places/{place_id}", response_model=PlaceDetails)
@@ -83,6 +94,7 @@ def place_details(place_id: str) -> PlaceDetails:
         field_mask="id,displayName,location",
     )
     location = data["location"]
+    require_inside(location["latitude"], location["longitude"])
     return PlaceDetails(
         id=data["id"],
         label=data["displayName"]["text"],
@@ -91,8 +103,17 @@ def place_details(place_id: str) -> PlaceDetails:
 
 
 @router.post("/routes", response_model=list[RouteResult])
-def walking_routes(request: RouteRequest, session: SessionDep) -> list[RouteResult]:
+def walking_routes(request: RouteRequest, session: SessionDep,
+                   access_token: str | None = Depends(optional_access_token)) -> list[RouteResult]:
     """Return Google's fastest walk and the alternative passing most zone trees."""
+    require_inside(request.origin.lat, request.origin.lng)
+    require_inside(request.destination.lat, request.destination.lng)
+    if access_token:
+        now = monotonic()
+        with _reroute_lock:
+            if now - _last_route_by_token.get(access_token, 0) < 20:
+                raise HTTPException(status_code=429, detail={"code": "reroute_rate_limited"})
+            _last_route_by_token[access_token] = now
     if not settings.google_maps_api_key:
         raise HTTPException(status_code=503, detail="Google Routes API key is not configured.")
 
@@ -106,7 +127,7 @@ def walking_routes(request: RouteRequest, session: SessionDep) -> list[RouteResu
     }
     headers = {
         "X-Goog-Api-Key": settings.google_maps_api_key,
-        "X-Goog-FieldMask": "routes.duration,routes.distanceMeters,routes.polyline.encodedPolyline",
+        "X-Goog-FieldMask": "routes.duration,routes.distanceMeters,routes.polyline.encodedPolyline,routes.legs.steps.navigationInstruction.instructions,routes.legs.steps.startLocation,routes.legs.steps.distanceMeters",
     }
     try:
         response = httpx.post(
@@ -188,7 +209,25 @@ def _result(route_id: str, label: str, scored: tuple[int, dict]) -> RouteResult:
         distanceKm=round(route["distanceMeters"] / 1000, 1),
         treeCount=tree_count,
         encodedPolyline=route["polyline"]["encodedPolyline"],
+        steps=[
+            {
+                "instruction": step.get("navigationInstruction", {}).get("instructions", ""),
+                "startLocation": step.get("startLocation", {}).get("latLng", {}),
+                "distanceMeters": step.get("distanceMeters", 0),
+            }
+            for leg in route.get("legs", [])
+            for step in leg.get("steps", [])
+        ],
     )
+
+
+def _inside(lat: float, lng: float) -> bool:
+    try:
+        from app.cbd import contains
+
+        return contains(lat, lng)
+    except HTTPException:
+        return False
 
 
 def _duration_seconds(value: str) -> int:
