@@ -170,7 +170,9 @@ const sproutLine = computed(() => {
       return sprout.calmPresetApplied ? `${base} ${AUTO_PRESET_NOTE}` : base
     }
     case 'shade':
-      return thermalChoice.value ? thermalReply(thermalChoice.value) : temperaturePrompt(temperature.value)
+      return thermalChoice.value
+        ? thermalReply(thermalChoice.value)
+        : temperaturePrompt(temperature.value)
     case 'journey': {
       const noise = noiseReply(journey.preferences.noise)
       const allergy = allergyReply(journey.preferences.allergy)
@@ -178,12 +180,17 @@ const sproutLine = computed(() => {
     }
     case 'location':
       if (locationError.value) return locationError.value
-      return journey.startLocation ? placeChosenReply(journey.startLocation.label) : DEFAULT_MAP_REPLY
+      return journey.startLocation
+        ? placeChosenReply(journey.startLocation.label)
+        : DEFAULT_MAP_REPLY
     case 'route':
       if (journey.sproutRoute) {
         // Sprout's own fixed-template sentence (backend/app/services/sprout.py) -
         // never generated here, so it can never claim a match the route didn't make.
-        return journey.sproutRoute.explanation ?? `Here's a walk to ${journey.sproutRoute.destination.label}.`
+        return (
+          journey.sproutRoute.explanation ??
+          `Here's a walk to ${journey.sproutRoute.destination.label}.`
+        )
       }
       return growError.value ? ROUTE_FAILURE_BUBBLE : 'Growing your route…'
     default:
@@ -296,7 +303,9 @@ watch(
         <button type="button" class="primary-button" @click="sprout.beginGuided">
           Hi Sprout, let’s go
         </button>
-        <button type="button" class="ghost-button" @click="sprout.skipToMap">Skip to the map</button>
+        <button type="button" class="ghost-button" @click="sprout.skipToMap">
+          Skip to the map
+        </button>
       </div>
       <HillsBackdrop />
     </div>
@@ -311,7 +320,8 @@ watch(
           :class="{
             active: item.active,
             reached: item.reached,
-            done: item.reached && !item.active && index < sprout.progress.findIndex((p) => p.active),
+            done:
+              item.reached && !item.active && index < sprout.progress.findIndex((p) => p.active),
           }"
           :disabled="!item.reached"
           :aria-current="item.active ? 'step' : undefined"
@@ -323,7 +333,9 @@ watch(
           </span>
           <span class="progress-label">{{ STEP_LABELS[item.id] }}</span>
         </button>
-        <button type="button" class="text-button replay" @click="sprout.replayIntro">Replay intro</button>
+        <button type="button" class="text-button replay" @click="sprout.replayIntro">
+          Replay intro
+        </button>
       </nav>
 
       <!-- Steps 5 and 6 are a full-bleed map with floating cards, as in the prototype -->
@@ -372,8 +384,14 @@ watch(
                 {{ landmark.label }}
               </button>
             </div>
-            <button type="button" class="location-button" :disabled="locating" @click="useMyLocation">
-              <ElIcon><LocationIcon /></ElIcon>{{ locating ? 'Finding your location…' : 'Use my location' }}
+            <button
+              type="button"
+              class="location-button"
+              :disabled="locating"
+              @click="useMyLocation"
+            >
+              <ElIcon><LocationIcon /></ElIcon
+              >{{ locating ? 'Finding your location…' : 'Use my location' }}
             </button>
             <p v-if="locationError" class="notice location-notice" role="alert">
               <ElIcon><Warning /></ElIcon>{{ locationError }}
@@ -415,16 +433,21 @@ watch(
                 </div>
               </div>
               <div v-if="journey.sproutRoute.summaryChips.length" class="preference-chips">
-                <span v-for="chip in journey.sproutRoute.summaryChips" :key="chip" class="preference-chip">{{
-                  chip
-                }}</span>
+                <span
+                  v-for="chip in journey.sproutRoute.summaryChips"
+                  :key="chip"
+                  class="preference-chip"
+                  >{{ chip }}</span
+                >
               </div>
               <p v-if="journey.sproutRoute.message" class="route-note" role="status">
                 {{ journey.sproutRoute.message }}
               </p>
               <div class="route-actions">
                 <button type="button" class="primary-button" @click="startWalk">Start walk</button>
-                <button type="button" class="ghost-button" @click="changeAnswers">Change answers</button>
+                <button type="button" class="ghost-button" @click="changeAnswers">
+                  Change answers
+                </button>
               </div>
               <p class="footnote">Zones from City of Melbourne tree data. Distances approximate.</p>
             </template>
@@ -468,7 +491,13 @@ watch(
               class="companion-trees"
               aria-hidden="true"
             >
-              <svg v-for="n in companionTreeCount" :key="n" width="34" height="40" viewBox="0 0 60 70">
+              <svg
+                v-for="n in companionTreeCount"
+                :key="n"
+                width="34"
+                height="40"
+                viewBox="0 0 60 70"
+              >
                 <rect x="27" y="44" width="6" height="24" rx="2" fill="#8a5a3b" />
                 <circle cx="30" cy="30" r="24" fill="#5fa150" />
               </svg>
@@ -496,7 +525,13 @@ watch(
                   <circle cx="20" cy="20" r="18" :fill="option.color" />
                   <circle cx="14" cy="17" r="2.2" fill="#2b2118" />
                   <circle cx="26" cy="17" r="2.2" fill="#2b2118" />
-                  <path :d="option.mouth" stroke="#2b2118" stroke-width="2.4" fill="none" stroke-linecap="round" />
+                  <path
+                    :d="option.mouth"
+                    stroke="#2b2118"
+                    stroke-width="2.4"
+                    fill="none"
+                    stroke-linecap="round"
+                  />
                 </svg>
                 <span>{{ option.label }}</span>
               </button>
@@ -544,7 +579,13 @@ watch(
                 <span class="option-title">{{ option.label }}</span>
                 <span class="option-hint">{{ option.hint }}</span>
                 <span class="tree-row" aria-hidden="true">
-                  <svg v-for="n in option.treeCount" :key="n" width="18" height="22" viewBox="0 0 60 70">
+                  <svg
+                    v-for="n in option.treeCount"
+                    :key="n"
+                    width="18"
+                    height="22"
+                    viewBox="0 0 60 70"
+                  >
                     <rect x="27" y="44" width="6" height="24" rx="2" fill="#8a5a3b" />
                     <circle cx="30" cy="30" r="24" fill="#5fa150" />
                   </svg>
@@ -583,7 +624,9 @@ watch(
             <span class="eyebrow">STEP 4 · MAKE THE JOURNEY EASIER</span>
             <h2>Last bit. Let’s make the walk easy on you.</h2>
             <fieldset>
-              <legend><ElIcon><Clock /></ElIcon> How much time do you have?</legend>
+              <legend>
+                <ElIcon><Clock /></ElIcon> How much time do you have?
+              </legend>
               <div class="pills">
                 <button
                   v-for="option in times"
@@ -598,7 +641,9 @@ watch(
               </div>
             </fieldset>
             <fieldset>
-              <legend><ElIcon><Headset /></ElIcon> Noise level</legend>
+              <legend>
+                <ElIcon><Headset /></ElIcon> Noise level
+              </legend>
               <div class="pills">
                 <button
                   v-for="option in noiseOptions"
@@ -632,8 +677,12 @@ watch(
           <div class="step-nav">
             <button type="button" class="text-button" @click="sprout.back">Back</button>
             <div class="step-nav-right">
-              <button type="button" class="ghost-button" @click="sprout.skipToMap">Skip to map</button>
-              <button type="button" class="primary-button" @click="sprout.next">{{ nextButtonLabel }}</button>
+              <button type="button" class="ghost-button" @click="sprout.skipToMap">
+                Skip to map
+              </button>
+              <button type="button" class="primary-button" @click="sprout.next">
+                {{ nextButtonLabel }}
+              </button>
             </div>
           </div>
         </section>

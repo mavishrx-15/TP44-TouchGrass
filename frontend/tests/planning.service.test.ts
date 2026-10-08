@@ -18,7 +18,13 @@ describe('buildPlanningPreferences (Iteration 3 contract)', () => {
       allergy: 'avoid',
       walkingTime: 15,
     })
-    expect(body).toEqual({ canopy: 'dense', shade: 'cool', noise: 'quiet', allergy: 'avoid', walkingTime: 15 })
+    expect(body).toEqual({
+      canopy: 'dense',
+      shade: 'cool',
+      noise: 'quiet',
+      allergy: 'avoid',
+      walkingTime: 15,
+    })
   })
 
   it('never sends "lower" pollen preference - the backend only accepts "avoid"', () => {
@@ -28,7 +34,9 @@ describe('buildPlanningPreferences (Iteration 3 contract)', () => {
 
   it('never sends a mood field, even if one were smuggled onto the preferences object', () => {
     const withMood = { ...emptyPreferences(), mood: 'stressed' } as Record<string, unknown>
-    const body = buildPlanningPreferences(withMood as Parameters<typeof buildPlanningPreferences>[0])
+    const body = buildPlanningPreferences(
+      withMood as Parameters<typeof buildPlanningPreferences>[0],
+    )
     expect('mood' in body).toBe(false)
   })
 })

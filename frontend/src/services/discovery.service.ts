@@ -1,50 +1,12 @@
-import { apiGet, apiPost } from '@/api/client'
-import type {
-  Coordinates,
-  PlaceSuggestion,
-  Precinct,
-  RouteOption,
-  RoutePlace,
-  TreeGenus,
-  TreeRecord,
-  TreeZone,
-} from '@/types/discovery'
-
-export interface GenusSummary {
-  genus: TreeGenus
-  treeCount: number
-}
+import { apiGet } from '@/api/client'
+import type { PlaceSuggestion, Precinct, RoutePlace, TreeRecord, TreeZone } from '@/types/discovery'
 
 type ApiZone = Omit<TreeZone, 'label' | 'description' | 'mapPosition' | 'nearestStreet'> & {
   nearestStreet?: string | null
 }
-type ApiTree = Omit<TreeRecord, 'distanceKm' | 'mapPosition'>
-
-export function findPrecinct(precincts: Precinct[], query: string): Precinct | undefined {
-  const normalized = query.trim().toLocaleLowerCase()
-  return precincts.find((precinct) => precinct.name.toLocaleLowerCase() === normalized)
-}
 
 export function getPrecincts(signal?: AbortSignal): Promise<Precinct[]> {
   return apiGet<Precinct[]>('/api/precincts', signal)
-}
-
-export function getSpecies(signal?: AbortSignal): Promise<GenusSummary[]> {
-  return apiGet<GenusSummary[]>('/api/species', signal)
-}
-
-export async function getWalkingRoutes(
-  origin: Coordinates,
-  destination: Coordinates,
-  signal?: AbortSignal,
-): Promise<RouteOption[]> {
-  // /api/routes now returns one scored route object, not a Fastest/Tree-Dense pair.
-  const route = await apiPost<RouteOption>(
-    '/api/routes',
-    { origin, destination, travelMode: 'WALK' },
-    signal,
-  )
-  return [{ ...route, id: 'personalised', label: 'Walking route' }]
 }
 
 export function getPlaceSuggestions(
@@ -81,21 +43,6 @@ export async function getPrecinctZones(
     label: zone.nearestStreet ? `${precinctName} · ${zone.nearestStreet}` : precinctName,
     description: `${zone.density}-density tree cluster${zone.dominantGenus ? ` dominated by ${zone.dominantGenus}` : ''}.`,
     mapPosition: { x: 0, y: 0, width: 0, height: 0 },
-  }))
-}
-
-export async function getPrecinctTrees(
-  precinct: Precinct,
-  signal?: AbortSignal,
-): Promise<TreeRecord[]> {
-  const result = await apiGet<ApiTree[]>(
-    `/api/trees?precinct=${encodeURIComponent(precinct.id)}&limit=500`,
-    signal,
-  )
-  return result.map((tree) => ({
-    ...tree,
-    distanceKm: distanceKm(precinct.referencePoint, tree.coordinates),
-    mapPosition: { x: 0, y: 0 },
   }))
 }
 

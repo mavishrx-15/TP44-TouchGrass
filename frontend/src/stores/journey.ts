@@ -1,15 +1,13 @@
 import { computed, ref, watch } from 'vue'
 import { defineStore } from 'pinia'
 import { emptyPreferences } from '@/types/personalisation'
-import type { Area, JourneyContext, PersonalisedRoute, TravelMode } from '@/types/personalisation'
+import type { JourneyContext, PersonalisedRoute, TravelMode } from '@/types/personalisation'
 import type { Precinct, RoutePlace } from '@/types/discovery'
 import type { AreaOption, PlannedRoute } from '@/types/planning'
 import {
   coverageFrom,
   deviceLocation,
-  loadAreas,
   loadPrecincts,
-  rankAreas,
   requestPersonalisedRoute,
   USE_MOCK_DATA,
 } from '@/services/personalisation.service'
@@ -55,23 +53,14 @@ export const useJourneyStore = defineStore('journey', () => {
   const startLocation = ref(saved.startLocation)
   const destination = ref(saved.destination)
   const precincts = ref<Precinct[]>([])
-  const areas = ref<Area[]>([])
   const route = ref<PersonalisedRoute | null>(null)
   const travelMode = ref<TravelMode>('WALK')
   const loading = ref(false)
-  const areasLoading = ref(false)
   const error = ref<string | null>(null)
-  const areaError = ref<string | null>(null)
   const coverage = computed(() =>
     startLocation.value ? coverageFrom(startLocation.value.coordinates, precincts.value) : null,
   )
   const summary = computed(() => preferenceChips(preferences.value))
-  const recommendations = computed(() =>
-    startLocation.value
-      ? rankAreas(areas.value, startLocation.value.coordinates, preferences.value)
-      : [],
-  )
-  const selectedArea = computed(() => areas.value.find((area) => area.id === destination.value?.id))
 
   // Sprout's own route and areas (POST /api/sprout/route, POST /api/sprout/areas).
   // Kept apart from `route`/`areas`/`recommendations` above, which still back the
@@ -130,8 +119,6 @@ export const useJourneyStore = defineStore('journey', () => {
 
   const cache = new Map<string, PersonalisedRoute>()
   let sequence = 0
-  let areaSequence = 0
-  let loadedPrecinctId: string | null = null
   let initPromise: Promise<void> | null = null
 
   function initialize() {
@@ -171,37 +158,8 @@ export const useJourneyStore = defineStore('journey', () => {
     { deep: true, flush: 'sync' },
   )
 
-  function skipPersonalisation() {
-    preferences.value = { ...emptyPreferences(), walkingTime: preferences.value.walkingTime }
-  }
-
   async function useCurrentLocation() {
     startLocation.value = await deviceLocation()
-  }
-
-  async function refreshAreas() {
-    const request = ++areaSequence
-    try {
-      await initialize()
-      const precinct = coverage.value?.precinct
-      if (!precinct) throw new Error('Choose a starting location to find nearby areas.')
-      // Zones/trees for a precinct don't change within a session - skip the
-      // (expensive) refetch when the destination just moves within the same one.
-      if (precinct.id === loadedPrecinctId && areas.value.length) return
-      areasLoading.value = true
-      areaError.value = null
-      areas.value = []
-      const result = await loadAreas(precinct)
-      if (request === areaSequence) {
-        areas.value = result
-        loadedPrecinctId = precinct.id
-      }
-    } catch (e) {
-      if (request === areaSequence)
-        areaError.value = e instanceof Error ? e.message : 'Areas could not be loaded.'
-    } finally {
-      if (request === areaSequence) areasLoading.value = false
-    }
   }
 
   async function calculate(mode: TravelMode = travelMode.value) {
@@ -228,7 +186,7 @@ export const useJourneyStore = defineStore('journey', () => {
     }
     loading.value = true
     try {
-      const result = await requestPersonalisedRoute(input, selectedArea.value)
+      const result = await requestPersonalisedRoute(input)
       if (request !== sequence) return false
       cache.set(key, result)
       route.value = result
@@ -242,34 +200,17 @@ export const useJourneyStore = defineStore('journey', () => {
     }
   }
 
-  async function findGreenerRoute() {
-    if (!startLocation.value) return false
-    await refreshAreas()
-    const best = recommendations.value[0]
-    if (!best) {
-      error.value = areaError.value ?? 'No areas were found nearby. Try another starting point.'
-      return false
-    }
-    destination.value = { id: best.id, label: best.label, coordinates: best.center }
-    return calculate('WALK')
-  }
-
   return {
     preferences,
     startLocation,
     destination,
     precincts,
-    areas,
     route,
     travelMode,
     loading,
-    areasLoading,
     error,
-    areaError,
     coverage,
     summary,
-    recommendations,
-    selectedArea,
     sproutRoute,
     sproutRouteLoading,
     sproutRouteError,
@@ -277,11 +218,8 @@ export const useJourneyStore = defineStore('journey', () => {
     sproutAreasLoading,
     sproutAreasError,
     initialize,
-    skipPersonalisation,
     useCurrentLocation,
-    refreshAreas,
     calculate,
-    findGreenerRoute,
     growSproutRoute,
     findSproutAreas,
   }

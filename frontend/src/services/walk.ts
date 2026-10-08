@@ -48,8 +48,17 @@ export function compassFrom(a: Coordinates, b: Coordinates): string {
     Math.cos(rad(a.lat)) * Math.sin(rad(b.lat)) -
     Math.sin(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.cos(dLng)
   const bearing = (Math.atan2(y, x) * 180) / Math.PI
-  const points = ['north', 'north-east', 'east', 'south-east', 'south', 'south-west', 'west', 'north-west']
-  return points[Math.round((((bearing + 360) % 360) / 45)) % 8]!
+  const points = [
+    'north',
+    'north-east',
+    'east',
+    'south-east',
+    'south',
+    'south-west',
+    'west',
+    'north-west',
+  ]
+  return points[Math.round(((bearing + 360) % 360) / 45) % 8]!
 }
 
 export interface WalkProgress {
@@ -71,7 +80,14 @@ export interface WalkProgress {
  */
 export function progressAlong(path: Coordinates[], position: Coordinates): WalkProgress {
   if (path.length === 0) {
-    return { walkedM: 0, totalM: 0, remainingM: 0, offRouteM: 0, segmentIndex: 0, snapped: position }
+    return {
+      walkedM: 0,
+      totalM: 0,
+      remainingM: 0,
+      offRouteM: 0,
+      segmentIndex: 0,
+      snapped: position,
+    }
   }
   const cumulative = [0]
   for (let i = 1; i < path.length; i++) {
@@ -199,10 +215,9 @@ export function pickTip(
 }
 
 /** The zone whose bounds contain the position, if any. */
-export function zoneContaining<T extends { bounds: { north: number; south: number; east: number; west: number } }>(
-  zones: T[],
-  position: Coordinates,
-): T | null {
+export function zoneContaining<
+  T extends { bounds: { north: number; south: number; east: number; west: number } },
+>(zones: T[], position: Coordinates): T | null {
   return (
     zones.find(
       (zone) =>

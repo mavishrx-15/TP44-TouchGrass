@@ -305,7 +305,12 @@ async function renderMessagePins() {
     content.setAttribute('aria-label', pin.label)
     content.addEventListener('click', () => emit('selectMessage', pin.id))
     messageMarkers.push(
-      new AdvancedMarkerElement({ map: map.value, position: pin.position, title: pin.label, content }),
+      new AdvancedMarkerElement({
+        map: map.value,
+        position: pin.position,
+        title: pin.label,
+        content,
+      }),
     )
   }
 }
@@ -331,7 +336,9 @@ async function renderEndpoints() {
     const dot = document.createElement('span')
     dot.className = isOrigin ? 'journey-origin-marker' : 'journey-destination-marker'
     const label = document.createElement('span')
-    label.className = isOrigin ? 'journey-endpoint-label origin' : 'journey-endpoint-label destination'
+    label.className = isOrigin
+      ? 'journey-endpoint-label origin'
+      : 'journey-endpoint-label destination'
     label.textContent = isOrigin ? 'Start' : 'End'
     content.append(dot, label)
     // AdvancedMarkerElement's own `title` sets the accessible name but,
@@ -607,7 +614,10 @@ onBeforeUnmount(() => {
   top: calc(100% + 5px);
   transform: translateX(-50%);
   white-space: nowrap;
-  font: 700 11px/1.3 'Figtree', system-ui, sans-serif;
+  font:
+    700 11px/1.3 'Figtree',
+    system-ui,
+    sans-serif;
   background: white;
   border-radius: 999px;
   padding: 2px 9px;
@@ -627,7 +637,9 @@ onBeforeUnmount(() => {
   border-radius: 50%;
   background: #1a73e8;
   border: 3px solid white;
-  box-shadow: 0 0 0 6px #1a73e833, 0 2px 6px #0004;
+  box-shadow:
+    0 0 0 6px #1a73e833,
+    0 2px 6px #0004;
 }
 /* Epic 7: approved message pins from other visitors. */
 .care-pin {

@@ -62,14 +62,14 @@ describe('access lifecycle', () => {
 describe('route guard', () => {
   it('protects direct links, permits valid sessions and redirects expired sessions', async () => {
     const { default: router } = await import('@/router')
-    await router.push('/tree-explorer')
+    await router.push('/rewards')
     expect(router.currentRoute.value.name).toBe('access')
-    expect(router.currentRoute.value.query.redirect).toBe('/tree-explorer')
+    expect(router.currentRoute.value.query.redirect).toBe('/rewards')
     setAccessToken(token(100))
     await router.push('/')
     expect(router.currentRoute.value.name).toBe('home')
     sessionStorage.setItem('touchgrass_access_token', token(-1))
-    await router.push('/map')
+    await router.push('/walk')
     expect(router.currentRoute.value.name).toBe('access')
   })
 })

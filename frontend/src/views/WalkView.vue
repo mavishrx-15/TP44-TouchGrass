@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { Clock, Location as LocationIcon, QuestionFilled, Warning } from '@element-plus/icons-vue'
+import { Location as LocationIcon, QuestionFilled, Warning } from '@element-plus/icons-vue'
 import GoogleMapCanvas from '@/components/GoogleMapCanvas.vue'
 import SproutTree from '@/components/sprout/SproutTree.vue'
 import GroundingSteps from '@/components/walk/GroundingSteps.vue'
@@ -16,7 +16,6 @@ import {
   ALMOST_RADIUS_M,
   ARRIVAL_RADIUS_M,
   FAR_FROM_ROUTE_M,
-  OFF_ROUTE_M,
   TURN_ALERT_M,
   WEAK_GPS_ACCURACY_M,
   distanceM,
@@ -130,7 +129,9 @@ const walkStepIndex = computed(() => {
 })
 
 const zoneId = computed(() => journey.destination?.id ?? null)
-const destinationZone = computed<TreeZone | null>(() => zones.value.find((zone) => zone.id === zoneId.value) ?? null)
+const destinationZone = computed<TreeZone | null>(
+  () => zones.value.find((zone) => zone.id === zoneId.value) ?? null,
+)
 /** Real tree count and top species for the destination, from GET /api/zones/{id}/facts. */
 const destinationFacts = ref<ZoneFacts | null>(null)
 
@@ -179,7 +180,9 @@ const path = computed<Coordinates[]>(() => {
   }
   return []
 })
-const totalM = computed(() => (path.value.length > 1 ? progressAlong(path.value, path.value[0]!).totalM : 0))
+const totalM = computed(() =>
+  path.value.length > 1 ? progressAlong(path.value, path.value[0]!).totalM : 0,
+)
 
 const liveProgress = computed<WalkProgress | null>(() => {
   if (gps.value !== 'on' || !position.value || path.value.length < 2) return null
@@ -206,7 +209,9 @@ const progress = computed(() => {
     snapped: path.value[0] ?? MELBOURNE_CENTER,
   } satisfies WalkProgress
 })
-const percent = computed(() => (totalM.value ? Math.round((progress.value.walkedM / totalM.value) * 100) : 0))
+const percent = computed(() =>
+  totalM.value ? Math.round((progress.value.walkedM / totalM.value) * 100) : 0,
+)
 
 const walkedPath = computed<Coordinates[]>(() => {
   if (!liveProgress.value || paused.value) return []
@@ -241,7 +246,10 @@ const messagePins = computed(() =>
 
 const sproutLine = computed(() => {
   if (sproutOverride.value) return sproutOverride.value
-  if (phase.value === 'intro') return hasRoute.value ? 'Ready when you are. I’ll walk beside you.' : 'Grow a route first, then we can walk it.'
+  if (phase.value === 'intro')
+    return hasRoute.value
+      ? 'Ready when you are. I’ll walk beside you.'
+      : 'Grow a route first, then we can walk it.'
   if (phase.value === 'walking') {
     if (paused.value) return PAUSE_TEXT
     if (worse.value) return WORSE_TEXT
@@ -300,9 +308,13 @@ function evaluateTips(now: number) {
   if (phase.value !== 'walking' || paused.value) return
   const candidates: TipCandidate[] = []
   const live = liveProgress.value
-  const topSpecies = destinationFacts.value?.topSpecies.slice(0, 2).map((species) => species.commonName) ?? []
+  const topSpecies =
+    destinationFacts.value?.topSpecies.slice(0, 2).map((species) => species.commonName) ?? []
   const treeCount =
-    destinationFacts.value?.treeCount ?? activeRoute.value?.destinationTreeCount ?? destinationZone.value?.treeCount ?? 0
+    destinationFacts.value?.treeCount ??
+    activeRoute.value?.destinationTreeCount ??
+    destinationZone.value?.treeCount ??
+    0
 
   // Distance-based tips need GPS. Without it, the clock decides instead.
   const destination = journey.destination?.coordinates
@@ -322,7 +334,11 @@ function evaluateTips(now: number) {
     }
     const zone = zoneContaining(zones.value, position.value)
     if (zone && zone.density !== 'Low') {
-      candidates.push({ kind: 'trees', key: `trees-${zone.id}`, text: treesTip(zone.density, zone.treeCount) })
+      candidates.push({
+        kind: 'trees',
+        key: `trees-${zone.id}`,
+        text: treesTip(zone.density, zone.treeCount),
+      })
     }
   } else {
     const remainingMinutes = minutesLeft(progress.value.remainingM)
@@ -388,10 +404,12 @@ function onGeoError(error: GeolocationPositionError) {
   if (error.code === error.PERMISSION_DENIED) {
     gps.value = 'denied'
     stopTracking()
-    sproutOverride.value = 'No GPS here, so I’ll keep time with you instead. Tips will come by the clock.'
+    sproutOverride.value =
+      'No GPS here, so I’ll keep time with you instead. Tips will come by the clock.'
   } else {
     gps.value = 'lost'
-    sproutOverride.value = 'I lost the GPS signal for a moment. I’ll keep looking, and tips follow the clock meanwhile.'
+    sproutOverride.value =
+      'I lost the GPS signal for a moment. I’ll keep looking, and tips follow the clock meanwhile.'
   }
   evaluateTips(Date.now())
 }
@@ -423,8 +441,10 @@ function startDemo() {
   void keepScreenOn()
   const tick = () => {
     const point = pointAtDistance(path.value, demoMetres)
-    onFix({ coords: { latitude: point.lat, longitude: point.lng, accuracy: 5 } } as GeolocationPosition)
-    demoMetres += WALK_PACE_M_PER_MIN * DEMO_SPEED / 60
+    onFix({
+      coords: { latitude: point.lat, longitude: point.lng, accuracy: 5 },
+    } as GeolocationPosition)
+    demoMetres += (WALK_PACE_M_PER_MIN * DEMO_SPEED) / 60
     if (demoMetres > totalM.value) clearInterval(demoTimer)
   }
   demoTimer = setInterval(tick, 1_000)
@@ -656,7 +676,10 @@ const mapCenterAuto = computed(() => phase.value === 'grounding')
         </button>
         <div v-if="helpOpen" class="help-panel" role="note">
           <p>{{ HELP_TEXT }}</p>
-          <p>If things feel heavy, talk to someone. {{ BEYOND_BLUE.label }}: <strong>{{ BEYOND_BLUE.number }}</strong></p>
+          <p>
+            If things feel heavy, talk to someone. {{ BEYOND_BLUE.label }}:
+            <strong>{{ BEYOND_BLUE.number }}</strong>
+          </p>
         </div>
       </div>
       <RouterLink class="text-button" to="/">Back to Sprout</RouterLink>
@@ -715,17 +738,24 @@ const mapCenterAuto = computed(() => phase.value === 'grounding')
             <h2>Walking to {{ journey.destination?.label }}</h2>
             <p class="from">From {{ journey.startLocation?.label }}</p>
             <div class="facts">
-              <div class="fact"><span>Walk time</span><strong>{{ activeRoute?.durationMinutes }} min</strong></div>
-              <div class="fact"><span>Distance</span><strong>{{ activeRoute?.distanceKm.toFixed(1) }} km</strong></div>
+              <div class="fact">
+                <span>Walk time</span><strong>{{ activeRoute?.durationMinutes }} min</strong>
+              </div>
+              <div class="fact">
+                <span>Distance</span><strong>{{ activeRoute?.distanceKm.toFixed(1) }} km</strong>
+              </div>
               <div v-if="activeRoute?.destinationTreeCount != null" class="fact">
                 <span>Area trees</span><strong>{{ activeRoute.destinationTreeCount }}</strong>
               </div>
               <div v-if="activeRoute?.denseZoneShare != null" class="fact">
-                <span>Tree-dense share</span><strong>{{ Math.round(activeRoute.denseZoneShare * 100) }}%</strong>
+                <span>Tree-dense share</span
+                ><strong>{{ Math.round(activeRoute.denseZoneShare * 100) }}%</strong>
               </div>
             </div>
             <div v-if="activeRoute?.summaryChips.length" class="chips">
-              <span v-for="chip in activeRoute.summaryChips" :key="chip" class="chip">{{ chip }}</span>
+              <span v-for="chip in activeRoute.summaryChips" :key="chip" class="chip">{{
+                chip
+              }}</span>
             </div>
           </article>
           <p class="reason">{{ LOCATION_REASON }}</p>
@@ -734,7 +764,9 @@ const mapCenterAuto = computed(() => phase.value === 'grounding')
               <ElIcon><LocationIcon /></ElIcon> Start walk
             </button>
             <button type="button" class="ghost-button" @click="beginWalk('demo')">Demo walk</button>
-            <button type="button" class="ghost-button" @click="beginWalk('none')">Walk without GPS</button>
+            <button type="button" class="ghost-button" @click="beginWalk('none')">
+              Walk without GPS
+            </button>
           </div>
         </template>
 
@@ -746,18 +778,31 @@ const mapCenterAuto = computed(() => phase.value === 'grounding')
             <p class="from">
               From {{ journey.startLocation?.label }} · {{ activeRoute?.durationMinutes }} min ·
               {{ activeRoute?.distanceKm.toFixed(1) }} km
-              <template v-if="activeRoute?.destinationTreeCount != null"> · {{ activeRoute.destinationTreeCount }} trees</template>
+              <template v-if="activeRoute?.destinationTreeCount != null">
+                · {{ activeRoute.destinationTreeCount }} trees</template
+              >
             </p>
           </div>
           <div v-if="activeRoute?.summaryChips.length" class="chips">
-            <span v-for="chip in activeRoute.summaryChips" :key="chip" class="chip">{{ chip }}</span>
+            <span v-for="chip in activeRoute.summaryChips" :key="chip" class="chip">{{
+              chip
+            }}</span>
           </div>
           <div class="progress-block">
             <div class="progress-head">
               <strong>{{ percent }}% of the route</strong>
-              <span class="muted">{{ formatDistance(progress.remainingM) }} left · {{ minutesLeft(progress.remainingM) }} min</span>
+              <span class="muted"
+                >{{ formatDistance(progress.remainingM) }} left ·
+                {{ minutesLeft(progress.remainingM) }} min</span
+              >
             </div>
-            <div class="bar" role="progressbar" :aria-valuenow="percent" aria-valuemin="0" aria-valuemax="100">
+            <div
+              class="bar"
+              role="progressbar"
+              :aria-valuenow="percent"
+              aria-valuemin="0"
+              aria-valuemax="100"
+            >
               <div class="bar-fill" :style="{ width: `${percent}%` }" />
             </div>
             <p v-if="gps === 'weak'" class="weak-note" role="status">
@@ -765,13 +810,19 @@ const mapCenterAuto = computed(() => phase.value === 'grounding')
             </p>
             <div v-if="farFromRoute && !demoMode" class="reroute" role="status">
               <p>
-                Your live location is too far from this route to track. Try the demo walk to see the full flow.
+                Your live location is too far from this route to track. Try the demo walk to see the
+                full flow.
               </p>
-              <button type="button" class="primary-button" @click="switchToDemo">Switch to demo walk</button>
+              <button type="button" class="primary-button" @click="switchToDemo">
+                Switch to demo walk
+              </button>
             </div>
-            <p v-if="demoMode" class="muted small">Demo walk: a simulated position moves along the route at {{ DEMO_SPEED }}× speed.</p>
+            <p v-if="demoMode" class="muted small">
+              Demo walk: a simulated position moves along the route at {{ DEMO_SPEED }}× speed.
+            </p>
             <p v-if="gps === 'lost'" class="weak-note" role="status">
-              <ElIcon><Warning /></ElIcon> GPS signal lost. I’m still looking; tips follow the clock.
+              <ElIcon><Warning /></ElIcon> GPS signal lost. I’m still looking; tips follow the
+              clock.
             </p>
             <p v-if="gps === 'denied'" class="muted small">
               No GPS mode. Your route is shown and tips come by time.
@@ -792,7 +843,9 @@ const mapCenterAuto = computed(() => phase.value === 'grounding')
               <button type="button" class="ghost-button" @click="togglePause">
                 {{ paused ? 'Keep walking' : 'I need a break' }}
               </button>
-              <button type="button" class="ghost-button" @click="feelingWorse">I’m feeling worse</button>
+              <button type="button" class="ghost-button" @click="feelingWorse">
+                I’m feeling worse
+              </button>
             </div>
             <button type="button" class="text-button danger" @click="endWalk">End walk</button>
           </div>
@@ -801,7 +854,9 @@ const mapCenterAuto = computed(() => phase.value === 'grounding')
             <span class="eyebrow">SPROUT’S LIVE TIPS</span>
             <ul>
               <li v-for="tip in tips" :key="tip.id">
-                <span class="tag">{{ tip.kind.toUpperCase() === 'CHECKIN' ? 'CHECK IN' : tip.kind.toUpperCase() }}</span>
+                <span class="tag">{{
+                  tip.kind.toUpperCase() === 'CHECKIN' ? 'CHECK IN' : tip.kind.toUpperCase()
+                }}</span>
                 {{ tip.text }}
               </li>
             </ul>
@@ -812,7 +867,8 @@ const mapCenterAuto = computed(() => phase.value === 'grounding')
         <template v-else-if="phase === 'grounding'">
           <p class="reached">You’ve reached your tree-dense area</p>
           <p v-if="rewards.state.visits.some((v) => v.zoneId === zoneId)" class="came-back">
-            You came back! This is visit {{ visitNumber(rewards.state, zoneId ?? '') }} to this area.
+            You came back! This is visit {{ visitNumber(rewards.state, zoneId ?? '') }} to this
+            area.
           </p>
           <article class="here">
             <span class="eyebrow">YOU’RE HERE</span>
@@ -826,7 +882,9 @@ const mapCenterAuto = computed(() => phase.value === 'grounding')
             <span class="eyebrow">MESSAGES FROM OTHER VISITORS</span>
             <ul>
               <li v-for="message in pinMessages" :key="message.id">
-                <button type="button" class="text-button" @click="onMessagePin(message.id)">{{ message.body.slice(0, 50) }}</button>
+                <button type="button" class="text-button" @click="onMessagePin(message.id)">
+                  {{ message.body.slice(0, 50) }}
+                </button>
               </li>
             </ul>
             <p v-if="openMessage" class="open-message">{{ openMessage.body }}</p>
@@ -852,14 +910,19 @@ const mapCenterAuto = computed(() => phase.value === 'grounding')
 
         <template v-else-if="phase === 'summary'">
           <article class="summary">
-            <span class="eyebrow">{{ summaryDuplicate ? 'ALREADY LOGGED TODAY' : 'WALK COMPLETE' }}</span>
+            <span class="eyebrow">{{
+              summaryDuplicate ? 'ALREADY LOGGED TODAY' : 'WALK COMPLETE'
+            }}</span>
             <h2 v-if="!summaryDuplicate">+{{ summaryAwarded }} leaf points</h2>
             <p class="muted">New total: {{ rewards.state.points }} leaf points</p>
             <p v-if="summaryVisitNumber === 1 && !summaryDuplicate" class="badge">
-              You helped care for this area. Visit {{ summaryFriend?.visitsNeeded }} more times this week to become a Canopy Friend.
+              You helped care for this area. Visit {{ summaryFriend?.visitsNeeded }} more times this
+              week to become a Canopy Friend.
             </p>
             <p v-if="summaryFriend?.earned" class="badge friend">Canopy Friend</p>
-            <p class="muted small">Points and visits are saved on this device only. No account needed.</p>
+            <p class="muted small">
+              Points and visits are saved on this device only. No account needed.
+            </p>
           </article>
           <NearbyAreas @pick="chooseArea" />
           <button type="button" class="primary-button" @click="visitAnother">Done</button>
@@ -874,7 +937,6 @@ const mapCenterAuto = computed(() => phase.value === 'grounding')
         </template>
       </section>
     </div>
-
   </div>
 </template>
 

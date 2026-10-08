@@ -22,8 +22,20 @@ export const MOOD_OPTIONS: {
   { value: 'calm', label: 'Calm', color: '#8fd07a', mouth: 'M13 23 Q20 30 27 23', stress: 1 },
   { value: 'okay', label: 'Okay', color: '#b9d77a', mouth: 'M14 24 Q20 27 26 24', stress: 2 },
   { value: 'tense', label: 'A bit tense', color: '#e6d27a', mouth: 'M14 25 L26 25', stress: 3 },
-  { value: 'stressed', label: 'Stressed', color: '#ecb173', mouth: 'M14 27 Q20 22 26 27', stress: 4 },
-  { value: 'overwhelmed', label: 'Overwhelmed', color: '#e8957a', mouth: 'M13 28 Q20 20 27 28', stress: 5 },
+  {
+    value: 'stressed',
+    label: 'Stressed',
+    color: '#ecb173',
+    mouth: 'M14 27 Q20 22 26 27',
+    stress: 4,
+  },
+  {
+    value: 'overwhelmed',
+    label: 'Overwhelmed',
+    color: '#e8957a',
+    mouth: 'M13 28 Q20 20 27 28',
+    stress: 5,
+  },
 ]
 
 const MOOD_REPLIES: Record<Mood, string> = {
@@ -52,9 +64,27 @@ export const CANOPY_OPTIONS: {
   /** Short description under the label, as in the prototype. */
   hint: string
 }[] = [
-  { value: 'open', label: 'Open sky', sliderValue: 10, treeCount: 1, hint: 'A few trees, plenty of light' },
-  { value: 'mixed', label: 'A bit of both', sliderValue: 50, treeCount: 3, hint: 'Leafy patches with some sun' },
-  { value: 'dense', label: 'Deep canopy', sliderValue: 100, treeCount: 6, hint: 'As many trees as possible' },
+  {
+    value: 'open',
+    label: 'Open sky',
+    sliderValue: 10,
+    treeCount: 1,
+    hint: 'A few trees, plenty of light',
+  },
+  {
+    value: 'mixed',
+    label: 'A bit of both',
+    sliderValue: 50,
+    treeCount: 3,
+    hint: 'Leafy patches with some sun',
+  },
+  {
+    value: 'dense',
+    label: 'Deep canopy',
+    sliderValue: 100,
+    treeCount: 6,
+    hint: 'As many trees as possible',
+  },
 ]
 const CANOPY_REPLIES: Record<CanopyChoice, string> = {
   open: 'Open skies it is! Just me and a bit of sunshine.',

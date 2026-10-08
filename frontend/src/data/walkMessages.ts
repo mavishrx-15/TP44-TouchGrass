@@ -41,12 +41,14 @@ export const WORSE_TEXT =
   'I’m sorry it feels hard. We can stop any time. You’ve already done something kind for yourself.'
 export const END_TEXT = 'Thanks for trying. Every walk counts, even the short ones.'
 export const REROUTE_QUESTION = 'Want me to find a new way from here?'
-export const ARRIVED_TEXT = 'You made it! First, find a tree near you. Walk to the closest one you can see.'
+export const ARRIVED_TEXT =
+  'You made it! First, find a tree near you. Walk to the closest one you can see.'
 export const PINNED_TEXT = 'Pinned right where you are! Now snap a photo of your tree.'
 export const FIND_TREE_TEXT =
   'Find a tree near you, and walk to the closest one you can reach safely.'
 export const TOUCH_BARK_TEXT = 'Gently touch the bark of the tree you found.'
-export const LISTEN_TEXT = 'Listen for 3 different sounds around you. Birds, leaves, traffic, anything.'
+export const LISTEN_TEXT =
+  'Listen for 3 different sounds around you. Birds, leaves, traffic, anything.'
 export const BREATHE_TEXT = 'Breathe in slowly for 4, hold for 2, and out for 6. Three times.'
 export const PIN_QUESTION =
   'Is there a tree right next to you? Stand beside it and I’ll pin it with your location.'
@@ -63,7 +65,8 @@ export const SAVED_NOTE =
   'Saved in TouchGrass with your pin and photo. Photos are checked before other visitors can see them.'
 export const THANKS_CHIP = 'Thanks for the shade'
 export const DAMAGE_CHIP = 'A branch is hanging off'
-export const MESSAGE_PROMPT = 'Write anything you like. If you spot damage, mention it and I’ll help you report it.'
+export const MESSAGE_PROMPT =
+  'Write anything you like. If you spot damage, mention it and I’ll help you report it.'
 
 /** Words that turn a message into a possible damage report (US7.4). */
 export const DAMAGE_WORDS = [
@@ -103,11 +106,17 @@ export const MOOD_LEVEL: Record<Mood, number> = {
 }
 
 /** US6.6: the before/after line, comparing the Epic 5 mood with the check-in. */
-export function moodChangeSummary(before: Mood, now: Mood): { text: string; direction: 'down' | 'same' | 'up' } {
+export function moodChangeSummary(
+  before: Mood,
+  now: Mood,
+): { text: string; direction: 'down' | 'same' | 'up' } {
   const delta = MOOD_LEVEL[now] - MOOD_LEVEL[before]
   if (delta < 0) {
     const levels = -delta
-    return { text: `Down ${levels} level${levels > 1 ? 's' : ''} since your walk started`, direction: 'down' }
+    return {
+      text: `Down ${levels} level${levels > 1 ? 's' : ''} since your walk started`,
+      direction: 'down',
+    }
   }
   if (delta > 0) {
     return { text: `Up ${delta} level${delta > 1 ? 's' : ''}`, direction: 'up' }
@@ -130,11 +139,16 @@ export function checkInReply(direction: 'down' | 'same' | 'up'): string {
 export function friendlyError(error: unknown, fallback: string): string {
   const geo = error as Partial<GeolocationPositionError> | null
   if (geo && typeof geo === 'object' && typeof geo.code === 'number' && !(error instanceof Error)) {
-    if (geo.code === 1) return 'Location is blocked. Allow location for TouchGrass in your browser settings, then try again.'
-    if (geo.code === 3) return 'I couldn’t get your position in time. Try again somewhere more open.'
+    if (geo.code === 1)
+      return 'Location is blocked. Allow location for TouchGrass in your browser settings, then try again.'
+    if (geo.code === 3)
+      return 'I couldn’t get your position in time. Try again somewhere more open.'
     return 'I couldn’t find your position just now. Try again in a moment.'
   }
-  if (error instanceof TypeError || (error instanceof Error && /fetch|network|abort|load failed/i.test(error.message))) {
+  if (
+    error instanceof TypeError ||
+    (error instanceof Error && /fetch|network|abort|load failed/i.test(error.message))
+  ) {
     return 'I couldn’t reach TouchGrass just now. Check your connection, then try again.'
   }
   if (error instanceof Error && error.message) return error.message

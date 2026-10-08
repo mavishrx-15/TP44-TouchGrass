@@ -12,7 +12,9 @@ const props = defineProps<{ before: Mood | null }>()
 const emit = defineEmits<{ log: [after: Mood | null] }>()
 
 const now = ref<Mood | null>(null)
-const beforeOption = computed(() => MOOD_OPTIONS.find((option) => option.value === props.before) ?? null)
+const beforeOption = computed(
+  () => MOOD_OPTIONS.find((option) => option.value === props.before) ?? null,
+)
 const nowOption = computed(() => MOOD_OPTIONS.find((option) => option.value === now.value) ?? null)
 const change = computed(() =>
   props.before && now.value ? moodChangeSummary(props.before, now.value) : null,
@@ -52,7 +54,13 @@ function skip() {
           <circle cx="20" cy="20" r="18" :fill="option.color" />
           <circle cx="14" cy="17" r="2.2" fill="#2b2118" />
           <circle cx="26" cy="17" r="2.2" fill="#2b2118" />
-          <path :d="option.mouth" stroke="#2b2118" stroke-width="2.4" fill="none" stroke-linecap="round" />
+          <path
+            :d="option.mouth"
+            stroke="#2b2118"
+            stroke-width="2.4"
+            fill="none"
+            stroke-linecap="round"
+          />
         </svg>
         <span>{{ option.label }}</span>
       </button>
