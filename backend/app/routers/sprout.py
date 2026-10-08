@@ -1,3 +1,4 @@
+from math import isfinite
 from typing import Literal
 
 import httpx
@@ -5,9 +6,10 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import bindparam, text
 
-from app.cbd import polygons, require_inside
+from app.cbd import contains_in_geometry, geometry, require_inside
 from app.config import settings
 from app.db import SessionDep
+from app.route_metrics import dense_zone_share, high_pollen_tree_count
 from app.routers.map_data import _bounds, _density
 from app.routers.routes import Coordinates, _decode_polyline, _distance_m, _duration_seconds
 
@@ -19,6 +21,7 @@ PREFERENCE_LABELS = {
     "noise": {"quiet": "Quieter", "lively": "Lively"},
     "allergy": {"avoid": "Avoid high pollen"},
 }
+CANOPY_DENSITY = {"open": "Low", "mixed": "Medium", "dense": "High"}
 
 
 class Preferences(BaseModel):
@@ -41,166 +44,412 @@ class RouteRequest(AreasRequest):
 
 
 def _candidates(session: SessionDep, req: AreasRequest) -> list[dict]:
-    rings = polygons()
-    statement = text("""
+    boundary = geometry()
+    pollen_names = settings.high_pollen_list
+    pollen_sql = (
+        "SUM(CASE WHEN lower(trim(t.common_name)) IN :pollen THEN 1 ELSE 0 END) AS pollen_count"
+        if pollen_names
+        else "NULL AS pollen_count"
+    )
+    statement = text(
+        f"""
         SELECT z.cluster_id, z.center_lat, z.center_lon, z.tree_count, z.precinct,
-               SUM(CASE WHEN lower(t.located_in) = 'park' THEN 1 ELSE 0 END) AS park_count,
-               SUM(CASE WHEN lower(t.common_name) IN :pollen THEN 1 ELSE 0 END) AS pollen_count
+               {pollen_sql}
         FROM zones z LEFT JOIN trees t ON t.cluster_id = z.cluster_id
         GROUP BY z.cluster_id, z.center_lat, z.center_lon, z.tree_count, z.precinct
-    """).bindparams(bindparam("pollen", expanding=True))
-    rows = session.execute(statement, {"pollen": settings.high_pollen_list or ["__none__"]}).all()
+        """
+    )
+    if pollen_names:
+        statement = statement.bindparams(bindparam("pollen", expanding=True))
+        rows = session.execute(statement, {"pollen": pollen_names}).all()
+    else:
+        rows = session.execute(statement).all()
+
     low, high = BANDS[req.preferences.walkingTime]
     result = []
     for row in rows:
         if row.cluster_id in req.excludeZoneIds:
             continue
-        if not any(_contains_ring(ring, row.center_lat, row.center_lon) for ring in rings):
+        if not contains_in_geometry(boundary, row.center_lat, row.center_lon):
             continue
+
         distance = _distance_m(req.origin.lat, req.origin.lng, row.center_lat, row.center_lon)
         estimate = distance * 1.3 / 80
         density = _density(row.tree_count)
-        if req.preferences.canopy == "dense" and density == "Low":
-            continue
-        if req.preferences.canopy == "mixed" and density == "Low":
-            continue
-        park_share = (row.park_count or 0) / max(row.tree_count, 1)
-        shade_fit = {"sunny": -park_share, "mixed": -abs(park_share - .5), "cool": park_share}.get(req.preferences.shade, 0)
-        result.append({"id": row.cluster_id, "center": {"lat": row.center_lat, "lng": row.center_lon},
-                       "treeCount": row.tree_count, "density": density, "bounds": _bounds(row.cluster_id).model_dump(),
-                       "precinct": row.precinct,
-                       "parkShare": park_share, "pollenCount": row.pollen_count or 0, "estimate": estimate,
-                       "inBand": low <= estimate <= high, "bandGap": max(low - estimate, 0, estimate - high),
-                       "distance": distance, "shadeFit": shade_fit,
-                       "unmetPreferences": _unmet(req.preferences, density, park_share, row.pollen_count or 0,
-                                                  low <= estimate <= high)})
-    return sorted(result, key=lambda z: (not z["inBand"], z["bandGap"],
-                                         z["pollenCount"] if req.preferences.allergy == "avoid" else 0,
-                                         -z["shadeFit"], -z["treeCount"], z["distance"]))
+        pollen_count = row.pollen_count if pollen_names else None
+        in_band = low <= estimate <= high
+        canopy_match = (
+            req.preferences.canopy is None or density == CANOPY_DENSITY[req.preferences.canopy]
+        )
+        result.append(
+            {
+                "id": row.cluster_id,
+                "center": {"lat": row.center_lat, "lng": row.center_lon},
+                "treeCount": row.tree_count,
+                "density": density,
+                "bounds": _bounds(row.cluster_id).model_dump(),
+                "precinct": row.precinct,
+                "pollenCount": pollen_count,
+                "estimate": estimate,
+                "inBand": in_band,
+                "bandGap": max(low - estimate, 0, estimate - high),
+                "distance": distance,
+                "canopyMatch": canopy_match,
+            }
+        )
+
+    return sorted(
+        result,
+        key=lambda area: (
+            not area["inBand"],
+            area["bandGap"],
+            (
+                area["pollenCount"]
+                if req.preferences.allergy == "avoid" and area["pollenCount"] is not None
+                else 0
+            ),
+            not area["canopyMatch"],
+            -area["treeCount"],
+            area["distance"],
+        ),
+    )
 
 
-def _unmet(preferences: Preferences, density: str, park_share: float, pollen: int, in_band: bool) -> list[str]:
+def _unmet(
+    preferences: Preferences,
+    density: str,
+    pollen_count: int | None,
+    in_band: bool,
+) -> list[str]:
     missed = []
-    if not in_band:
+    if not in_band and preferences.walkingTime is not None:
         missed.append("walkingTime")
-    if preferences.noise:
-        missed.append("noise")
-    if preferences.allergy == "avoid" and (pollen or not settings.high_pollen_list):
+    if preferences.canopy is not None and density != CANOPY_DENSITY[preferences.canopy]:
+        missed.append("canopy")
+    if preferences.allergy == "avoid" and pollen_count is not None and pollen_count > 0:
         missed.append("allergy")
-    if preferences.shade == "sunny" and park_share > .8:
-        missed.append("shade")
-    if preferences.shade == "cool" and park_share < .2:
-        missed.append("shade")
-    if preferences.shade == "mixed" and abs(park_share - .5) > .3:
-        missed.append("shade")
     return missed
 
 
-def _contains_ring(ring: list[list[float]], lat: float, lng: float) -> bool:
-    inside = False
-    for i, (x1, y1) in enumerate(ring):
-        x2, y2 = ring[(i + 1) % len(ring)]
-        if (y1 > lat) != (y2 > lat) and lng < (x2 - x1) * (lat - y1) / (y2 - y1) + x1:
-            inside = not inside
-    return inside
+def _unverified_preferences(
+    preferences: Preferences, pollen_configured: bool, route_measured: bool
+) -> list[dict[str, str]]:
+    unverified = []
+    if preferences.noise:
+        unverified.append(
+            {
+                "preference": "noise",
+                "reason": (
+                    "No street-noise dataset is configured, so this preference " "was not verified."
+                ),
+            }
+        )
+    if preferences.shade:
+        unverified.append(
+            {
+                "preference": "shade",
+                "reason": (
+                    "No shade or sun-exposure dataset is configured; tree density "
+                    "is not a direct shade measurement."
+                ),
+            }
+        )
+    if preferences.allergy == "avoid":
+        if not pollen_configured:
+            reason = (
+                "HIGH_POLLEN_SPECIES is not configured, so pollen exposure "
+                "could not be verified."
+            )
+        elif not route_measured:
+            reason = (
+                "The walking route has not been calculated, so route pollen exposure is unverified."
+            )
+        else:
+            reason = ""
+        if reason:
+            unverified.append({"preference": "allergy", "reason": reason})
+    return unverified
+
+
+def _preference_chips(preferences: Preferences) -> list[str]:
+    return [
+        PREFERENCE_LABELS[key][value]
+        for key in PREFERENCE_LABELS
+        if (value := getattr(preferences, key))
+    ]
+
+
+def _public_zone(area: dict, label: str | None = None) -> dict:
+    zone_label = label or f"{area['precinct']} · Tree zone {area['id']}"
+    return {
+        "id": area["id"],
+        "label": zone_label,
+        "center": area["center"],
+        "bounds": area["bounds"],
+        "treeCount": area["treeCount"],
+        "density": area["density"],
+    }
+
+
+def _area_card(area: dict, preferences: Preferences) -> dict:
+    unmet = _unmet(
+        preferences,
+        area["density"],
+        pollen_count=None,
+        in_band=area["inBand"],
+    )
+    label = f"{area['precinct']} · Tree zone {area['id']}"
+    return {
+        "id": area["id"],
+        "label": label,
+        "destination": _public_zone(area, label),
+        "walkingTimeMinutes": round(area["estimate"]),
+        "distanceMeters": round(area["distance"]),
+        "preferenceChips": _preference_chips(preferences),
+        "unmetPreferences": unmet,
+        "unverifiedPreferences": _unverified_preferences(
+            preferences, bool(settings.high_pollen_list), route_measured=False
+        ),
+    }
 
 
 @router.get("/cbd/zones")
 def cbd_zones(session: SessionDep) -> dict:
-    rings = polygons()
-    rows = session.execute(text("SELECT cluster_id, center_lat, center_lon, tree_count FROM zones")).all()
+    boundary = geometry()
+    rows = session.execute(
+        text("SELECT cluster_id, center_lat, center_lon, tree_count, precinct FROM zones")
+    ).all()
     zones = []
     for row in rows:
-        if any(_contains_ring(ring, row.center_lat, row.center_lon) for ring in rings):
-            zones.append({"id": row.cluster_id, "center": {"lat": row.center_lat, "lng": row.center_lon},
-                          "bounds": _bounds(row.cluster_id).model_dump(), "treeCount": row.tree_count,
-                          "density": _density(row.tree_count)})
-    boundary = {"type": "Polygon", "coordinates": rings} if len(rings) == 1 else {
-        "type": "MultiPolygon", "coordinates": [[ring] for ring in rings]}
+        if contains_in_geometry(boundary, row.center_lat, row.center_lon):
+            label = f"{row.precinct} · Tree zone {row.cluster_id}"
+            zones.append(
+                {
+                    "id": row.cluster_id,
+                    "label": label,
+                    "precinct": row.precinct,
+                    "center": {"lat": row.center_lat, "lng": row.center_lon},
+                    "bounds": _bounds(row.cluster_id).model_dump(),
+                    "treeCount": row.tree_count,
+                    "density": _density(row.tree_count),
+                }
+            )
     return {"boundary": boundary, "zones": zones}
 
 
 @router.post("/sprout/areas")
 def areas(request: AreasRequest, session: SessionDep) -> list[dict]:
     require_inside(request.origin.lat, request.origin.lng)
-    return [_area_card(row, request.preferences) for row in _candidates(session, request)[:request.limit]]
-
-
-def _area_card(row: dict, preferences: Preferences) -> dict:
-    minutes = round(row["estimate"])
-    return {"id": row["id"], "label": f"CBD · Tree zone {row['id']}", "destination": _public_zone(row),
-            "walkingTimeMinutes": minutes, "distanceMeters": round(row["distance"]),
-            "preferenceChips": _chips(preferences), "unmetPreferences": row["unmetPreferences"]}
-
-
-def _public_zone(area: dict, label: str | None = None) -> dict:
-    return {"id": area["id"], "label": label or f"{area['precinct']} · Tree zone {area['id']}",
-            "center": area["center"], "bounds": area["bounds"], "treeCount": area["treeCount"],
-            "density": area["density"]}
-
-
-def _chips(preferences: Preferences) -> list[str]:
-    return [PREFERENCE_LABELS[key][value] for key in PREFERENCE_LABELS
-            if (value := getattr(preferences, key))]
+    return [
+        _area_card(area, request.preferences)
+        for area in _candidates(session, request)[: request.limit]
+    ]
 
 
 @router.post("/sprout/route")
 def sprout_route(request: RouteRequest, session: SessionDep) -> dict:
     require_inside(request.origin.lat, request.origin.lng)
     if not settings.google_maps_api_key:
-        raise HTTPException(status_code=503, detail="Google Routes API key is not configured.")
+        raise HTTPException(status_code=503, detail={"code": "google_maps_unconfigured"})
     candidates = _candidates(session, request)
     if not candidates:
-        raise HTTPException(status_code=404, detail="No CBD zones match the selected canopy preference.")
+        raise HTTPException(status_code=404, detail={"code": "no_matching_cbd_zones"})
+
     routed = []
     for area in candidates[:3]:
+        require_inside(area["center"]["lat"], area["center"]["lng"])
         route = _google_route(request.origin, area["center"])
-        minutes = _duration_seconds(route["duration"]) / 60
-        routed.append((area, route, minutes))
+        try:
+            path = _decode_polyline(route["polyline"]["encodedPolyline"])
+            minutes = _duration_seconds(route["duration"]) / 60
+            distance_m = float(route["distanceMeters"])
+        except (KeyError, TypeError, ValueError, IndexError) as error:
+            raise HTTPException(
+                status_code=502, detail={"code": "google_routes_invalid_response"}
+            ) from error
+        if not path or not isfinite(distance_m) or distance_m < 0:
+            raise HTTPException(status_code=502, detail={"code": "google_routes_invalid_response"})
+        pollen_count = high_pollen_tree_count(path, settings.high_pollen_list, session)
+        routed.append(
+            {
+                "area": area,
+                "route": route,
+                "path": path,
+                "minutes": minutes,
+                "distanceMeters": distance_m,
+                "pollenCount": pollen_count,
+                "denseZoneShare": dense_zone_share(path, session),
+            }
+        )
+
     low, high = BANDS[request.preferences.walkingTime]
-    fitting = [item for item in routed if low <= item[2] <= high]
-    area, route, minutes = min(fitting or routed, key=lambda x: (
-        x[0]["pollenCount"] if request.preferences.allergy == "avoid" else 0,
-        -x[0]["treeCount"], x[2])) if fitting else min(
-        routed, key=lambda x: (max(low - x[2], 0, x[2] - high),
-                               x[0]["pollenCount"] if request.preferences.allergy == "avoid" else 0,
-                               -x[0]["treeCount"], x[2]))
-    unmet = _unmet(request.preferences, area["density"], area["parkShare"], area["pollenCount"], low <= minutes <= high)
-    chips = _chips(request.preferences)
-    decoded = _decode_polyline(route["polyline"]["encodedPolyline"])
-    dense = session.execute(text("SELECT center_lat, center_lon FROM zones WHERE tree_count >= 10")).all()
-    dense_share = round(sum(1 for lat, lng in decoded if any(
-        abs(lat - z.center_lat) <= .0005 and abs(lng - z.center_lon) <= .0005 for z in dense
-    )) / max(len(decoded), 1), 2)
-    missed = ", ".join(unmet)
-    explanation = (f"This route offers {area['treeCount']} trees for {chips[0] if chips else 'your walk'}. "
-                   + (f"The {minutes:.0f}-minute walk misses your selected {missed} preference." if missed
-                      else f"It takes about {minutes:.0f} minutes through tree-dense areas."))
-    return {"destination": _public_zone(area),
-            "walkingTimeMinutes": round(minutes), "distanceMeters": route["distanceMeters"],
-            "denseZoneShare": dense_share, "preferenceChips": chips, "unmetPreferences": unmet,
-            "explanation": explanation, "encodedPolyline": route["polyline"]["encodedPolyline"],
-            "steps": _steps(route)}
+    selected = min(
+        routed,
+        key=lambda item: (
+            not low <= item["minutes"] <= high,
+            max(low - item["minutes"], 0, item["minutes"] - high),
+            (
+                item["pollenCount"]
+                if request.preferences.allergy == "avoid" and item["pollenCount"] is not None
+                else 0
+            ),
+            not item["area"]["canopyMatch"],
+            -item["area"]["treeCount"],
+            item["distanceMeters"],
+        ),
+    )
+    area = selected["area"]
+    minutes = selected["minutes"]
+    pollen_count = selected["pollenCount"]
+    unmet = _unmet(
+        request.preferences,
+        area["density"],
+        pollen_count=pollen_count,
+        in_band=low <= minutes <= high,
+    )
+    unverified = _unverified_preferences(
+        request.preferences,
+        bool(settings.high_pollen_list),
+        route_measured=True,
+    )
+    preference_chips = _preference_chips(request.preferences)
+    destination_label = f"{area['precinct']} · Tree zone {area['id']}"
+    explanation = _explanation(
+        area,
+        minutes,
+        selected["distanceMeters"],
+        selected["denseZoneShare"],
+        request.preferences,
+        pollen_count,
+    )
+    return {
+        "destination": _public_zone(area, destination_label),
+        "walkingTimeMinutes": round(minutes),
+        "distanceMeters": round(selected["distanceMeters"]),
+        "denseZoneShare": selected["denseZoneShare"],
+        "preferenceChips": preference_chips,
+        "unmetPreferences": unmet,
+        "unverifiedPreferences": unverified,
+        "explanation": explanation,
+        "encodedPolyline": selected["route"]["polyline"]["encodedPolyline"],
+        "steps": _steps(selected["route"]),
+    }
 
 
-def _google_route(origin: Coordinates, dest: dict) -> dict:
-    response = httpx.post("https://routes.googleapis.com/directions/v2:computeRoutes",
-        json={"origin": {"location": {"latLng": {"latitude": origin.lat, "longitude": origin.lng}}},
-              "destination": {"location": {"latLng": {"latitude": dest['lat'], "longitude": dest['lng']}}},
-              "travelMode": "WALK", "languageCode": "en-AU", "units": "METRIC"},
-        headers={"X-Goog-Api-Key": settings.google_maps_api_key,
-                 "X-Goog-FieldMask": "routes.duration,routes.distanceMeters,routes.polyline.encodedPolyline,routes.legs.steps.navigationInstruction.instructions,routes.legs.steps.startLocation,routes.legs.steps.distanceMeters"}, timeout=15)
+def _explanation(
+    area: dict,
+    minutes: float,
+    distance_m: float,
+    dense_share: float,
+    preferences: Preferences,
+    pollen_count: int | None,
+) -> str:
+    label = f"{area['precinct']} · Tree zone {area['id']}"
+    facts = [
+        f"{label} is about {minutes:.0f} minutes and {distance_m / 1000:.1f} km away",
+        f"its zone contains {area['treeCount']} trees ({area['density']} density)",
+        f"{dense_share:.0%} of the route distance is inside zones with 10 or more trees",
+    ]
+    if preferences.walkingTime is not None:
+        low, high = BANDS[preferences.walkingTime]
+        if low <= minutes <= high:
+            facts.append(
+                f"that matches your {preferences.walkingTime}-minute target ({low}–{high} min)"
+            )
+        else:
+            facts.append(
+                f"that is outside your {preferences.walkingTime}-minute target ({low}–{high} min)"
+            )
+    if preferences.canopy:
+        preferred_density = CANOPY_DENSITY[preferences.canopy]
+        match_word = "matches" if area["density"] == preferred_density else "does not match"
+        facts.append(
+            f"your {PREFERENCE_LABELS['canopy'][preferences.canopy]} preference "
+            f"{match_word} the {area['density']} density tier"
+        )
+    if preferences.allergy == "avoid":
+        if pollen_count is None:
+            facts.append("high-pollen exposure could not be verified")
+        elif pollen_count == 0:
+            facts.append("no configured high-pollen trees were detected within 100 m of the route")
+        else:
+            facts.append(
+                f"the route passes within 100 m of {pollen_count} configured "
+                "high-pollen tree(s), so this preference is not met"
+            )
+    if preferences.noise:
+        facts.append("noise could not be verified because no street-noise data is available")
+    if preferences.shade:
+        facts.append("shade could not be verified because no sun-exposure data is available")
+    return "; ".join(facts) + "."
+
+
+def _google_route(origin: Coordinates, destination: dict[str, float]) -> dict:
     try:
+        response = httpx.post(
+            "https://routes.googleapis.com/directions/v2:computeRoutes",
+            json={
+                "origin": {
+                    "location": {
+                        "latLng": {
+                            "latitude": origin.lat,
+                            "longitude": origin.lng,
+                        }
+                    }
+                },
+                "destination": {
+                    "location": {
+                        "latLng": {
+                            "latitude": destination["lat"],
+                            "longitude": destination["lng"],
+                        }
+                    }
+                },
+                "travelMode": "WALK",
+                "languageCode": "en-AU",
+                "units": "METRIC",
+            },
+            headers={
+                "X-Goog-Api-Key": settings.google_maps_api_key,
+                "X-Goog-FieldMask": (
+                    "routes.duration,routes.distanceMeters,routes.polyline.encodedPolyline,"
+                    "routes.legs.steps.navigationInstruction.instructions,"
+                    "routes.legs.steps.startLocation,routes.legs.steps.distanceMeters"
+                ),
+            },
+            timeout=15,
+        )
         response.raise_for_status()
-    except httpx.HTTPError as exc:
-        raise HTTPException(status_code=502, detail="Google Routes could not calculate this walk.") from exc
-    routes = response.json().get("routes", [])
+        data = response.json()
+    except httpx.HTTPStatusError as error:
+        raise HTTPException(
+            status_code=502, detail={"code": "google_routes_request_failed"}
+        ) from error
+    except httpx.HTTPError as error:
+        raise HTTPException(
+            status_code=502, detail={"code": "google_routes_unavailable"}
+        ) from error
+    except ValueError as error:
+        raise HTTPException(
+            status_code=502, detail={"code": "google_routes_invalid_response"}
+        ) from error
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=502, detail={"code": "google_routes_invalid_response"})
+    routes = data.get("routes")
     if not routes:
-        raise HTTPException(status_code=404, detail="No walking route was found.")
+        raise HTTPException(status_code=404, detail={"code": "route_not_found"})
+    if not isinstance(routes[0], dict):
+        raise HTTPException(status_code=502, detail={"code": "google_routes_invalid_response"})
     return routes[0]
 
 
 def _steps(route: dict) -> list[dict]:
-    return [{"instruction": s.get("navigationInstruction", {}).get("instructions", ""),
-             "startLocation": s.get("startLocation", {}).get("latLng", {}), "distanceMeters": s.get("distanceMeters", 0)}
-            for leg in route.get("legs", []) for s in leg.get("steps", [])]
+    return [
+        {
+            "instruction": step.get("navigationInstruction", {}).get("instructions", ""),
+            "startLocation": step.get("startLocation", {}).get("latLng", {}),
+            "distanceMeters": step.get("distanceMeters", 0),
+        }
+        for leg in route.get("legs", [])
+        for step in leg.get("steps", [])
+    ]

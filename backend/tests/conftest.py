@@ -20,6 +20,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from app.config import settings
 from app.db import get_session
 from app.main import app
 
@@ -74,7 +75,7 @@ TREES = [
 
 
 @pytest.fixture
-def client(tmp_path: Path) -> Iterator[TestClient]:
+def test_session_factory(tmp_path: Path):
     db = tmp_path / "test.db"
     raw = sqlite3.connect(db)
     raw.executescript(SCHEMA.read_text())
@@ -84,12 +85,19 @@ def client(tmp_path: Path) -> Iterator[TestClient]:
     raw.close()
 
     engine = create_engine(f"sqlite:///{db}")
-    TestSession = sessionmaker(bind=engine)
+    factory = sessionmaker(bind=engine)
+    yield factory
+    engine.dispose()
+
+
+@pytest.fixture
+def client(test_session_factory, monkeypatch) -> Iterator[TestClient]:
+    monkeypatch.setattr(settings, "access_token", "test-access-token")
 
     def override():
-        with TestSession() as session:
+        with test_session_factory() as session:
             yield session
 
     app.dependency_overrides[get_session] = override
-    yield TestClient(app)
+    yield TestClient(app, headers={"Authorization": "Bearer test-access-token"})
     app.dependency_overrides.clear()

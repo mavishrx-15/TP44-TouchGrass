@@ -5,6 +5,9 @@ Change this file and tell the other side; do not change response shapes silently
 
 Base path: /api
 
+Authentication: every API route requires the configured bearer access token;
+/health is the only public endpoint.
+
     GET /api/precincts              suburbs available in the search dropdown
     GET /api/species                genera available in the map filter panel
     GET /api/zones?precinct=...     tree-dense areas, ranked (US1.1, US1.2)
@@ -121,13 +124,24 @@ router = APIRouter()
 
 @router.get("/zones/{zone_id}/facts", dependencies=[Depends(require_access_token)])
 def zone_facts(zone_id: str, session: SessionDep) -> dict:
-    zone = session.execute(text("SELECT tree_count FROM zones WHERE cluster_id=:id"), {"id": zone_id}).first()
+    zone = session.execute(
+        text("SELECT tree_count FROM zones WHERE cluster_id=:id"), {"id": zone_id}
+    ).first()
     if not zone:
         raise HTTPException(status_code=404, detail="Unknown zone.")
-    names = session.execute(text("""SELECT common_name, COUNT(*) AS n FROM trees
-        WHERE cluster_id=:id GROUP BY common_name ORDER BY n DESC, common_name LIMIT 2"""), {"id": zone_id}).all()
-    return {"treeCount": zone.tree_count, "density": _density(zone.tree_count),
-            "commonNames": [row.common_name for row in names]}
+    names = session.execute(
+        text(
+            """SELECT common_name, COUNT(*) AS n FROM trees
+        WHERE cluster_id=:id GROUP BY common_name ORDER BY n DESC, common_name LIMIT 2"""
+        ),
+        {"id": zone_id},
+    ).all()
+    return {
+        "treeCount": zone.tree_count,
+        "density": _density(zone.tree_count),
+        "commonNames": [row.common_name for row in names],
+    }
+
 
 # US1.2: the 25th and 75th percentiles of zones.tree_count.
 DENSITY_HIGH = 37

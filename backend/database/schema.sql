@@ -76,3 +76,9 @@ CREATE TABLE tree_messages (
 );
 CREATE INDEX idx_tree_messages_pin ON tree_messages(pin_id);
 CREATE INDEX idx_tree_messages_device ON tree_messages(device_id, created_at);
+
+CREATE TABLE device_credentials (
+    device_id TEXT PRIMARY KEY,
+    credential_hash TEXT NOT NULL,
+    created_at TIMESTAMP NOT NULL
+);

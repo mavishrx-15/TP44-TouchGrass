@@ -7,12 +7,16 @@ from PIL import Image, PngImagePlugin
 from app import cbd
 from app.config import settings
 from app.routers.pins import _clean_photo
-from app.routers.sprout import Preferences, _unmet
+from app.routers.sprout import Preferences, _unmet, _unverified_preferences
 from app.routers.weather import _band
 
 
 def test_hoddle_polygon_contains_only_configured_area(monkeypatch):
-    monkeypatch.setattr(settings, "cbd_boundary_geojson", '{"type":"Polygon","coordinates":[[[144.9,-37.9],[145.0,-37.9],[145.0,-37.8],[144.9,-37.8],[144.9,-37.9]]]}')
+    monkeypatch.setattr(
+        settings,
+        "cbd_boundary_geojson",
+        '{"type":"Polygon","coordinates":[[[144.9,-37.9],[145.0,-37.9],[145.0,-37.8],[144.9,-37.8],[144.9,-37.9]]]}',
+    )
     assert cbd.contains(-37.85, 144.95)
     with pytest.raises(HTTPException) as error:
         cbd.require_inside(-37.95, 144.95)
@@ -28,7 +32,9 @@ def test_missing_boundary_fails_closed(monkeypatch):
     assert error.value.detail["code"] == "cbd_boundary_unconfigured"
 
 
-@pytest.mark.parametrize(("temperature", "expected"), [(25, "warm"), (24.9, "mild"), (15, "mild"), (14.9, "cool")])
+@pytest.mark.parametrize(
+    ("temperature", "expected"), [(25, "warm"), (24.9, "mild"), (15, "mild"), (14.9, "cool")]
+)
 def test_temperature_bands(temperature, expected):
     assert _band(temperature) == expected
 
@@ -46,7 +52,10 @@ def test_photo_is_reencoded_without_source_metadata():
     assert result.size == (12, 8)
 
 
-def test_preferences_with_unavailable_pollen_data_are_marked_unmet(monkeypatch):
+def test_preferences_without_data_are_marked_unverified_not_measured_as_unmet(monkeypatch):
     monkeypatch.setattr(settings, "high_pollen_species", "")
-    missed = _unmet(Preferences(allergy="avoid", noise="quiet"), "High", .5, 0, True)
-    assert missed == ["noise", "allergy"]
+    preferences = Preferences(allergy="avoid", noise="quiet")
+    missed = _unmet(preferences, "High", None, True)
+    unverified = _unverified_preferences(preferences, False, True)
+    assert missed == []
+    assert {item["preference"] for item in unverified} == {"noise", "allergy"}
