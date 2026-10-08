@@ -100,6 +100,10 @@ def client(tmp_path: Path, monkeypatch) -> Iterator[TestClient]:
     # need to think about auth. access_token_secret must be >=32 bytes.
     monkeypatch.setattr(settings, "access_password", "test-password")
     monkeypatch.setattr(settings, "access_token_secret", "test-secret-32-bytes-minimum!!!!")
+    # Pin this too - Settings() reads the developer's real .env, so a local
+    # TTL tweak (e.g. while manually testing expiry) would otherwise leak
+    # into every test that asserts the default.
+    monkeypatch.setattr(settings, "access_token_ttl_seconds", 3600)
     db = tmp_path / "test.db"
     raw = sqlite3.connect(db)
     raw.executescript(SCHEMA.read_text())

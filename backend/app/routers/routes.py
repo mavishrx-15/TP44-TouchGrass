@@ -8,27 +8,31 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import text
 
+from app.cbd import coverage_bounds, require_inside
 from app.config import settings
 from app.db import SessionDep
-from app.routers.map_data import (
+from app.schemas.common import Coordinates
+from app.schemas.map_data import AreaMetrics, Bounds
+from app.services.zone_data import (
+    DENSITY_LOW,
+    GRID_HALF,
     HIGH_POLLEN_FAMILIES,
     HIGH_POLLEN_GENERA,
-    AreaMetrics,
+    _bounds,
 )
 
 router = APIRouter()
 EARTH_RADIUS_M = 6_371_000
 TREE_CORRIDOR_M = 100
 
+# denseZoneShare is measured along the route's length, so the path is sampled
+# at a fixed distance rather than at Google's vertices, which bunch up on bends.
+DENSE_SHARE_SAMPLE_M = 5
+
 TravelMode = Literal["WALK", "TRANSIT"]
 
 # Iteration-2 handoff, "Prototype rules requiring team confirmation".
 WALKING_TIME_TOLERANCE_MINUTES = 2
-
-
-class Coordinates(BaseModel):
-    lat: float
-    lng: float
 
 
 class Preferences(BaseModel):
@@ -62,6 +66,7 @@ class Corridor(BaseModel):
     park: int
     high_pollen: int
     canopy: int  # mean percentile of the zones the route passes through
+    dense_share: float = 0.0  # share of the route's length inside Medium or High zones
 
     def metrics(self) -> AreaMetrics:
         return AreaMetrics(
@@ -114,6 +119,9 @@ class RouteResult(BaseModel):
     metrics: AreaMetrics | None = None
     match: MatchSummary | None = None
     message: str | None = None
+    # US5.6 "the share of the route through tree dense zones", 0-1. Null in
+    # TRANSIT, like metrics: it is a claim about what you walk through.
+    denseZoneShare: float | None = None
 
 
 def _match(
@@ -242,15 +250,24 @@ class PlaceDetails(BaseModel):
 
 @router.get("/places/autocomplete", response_model=list[PlaceSuggestion])
 def autocomplete_places(query: str = Query(min_length=2, max_length=120)) -> list[PlaceSuggestion]:
-    """Google Places suggestions biased to inner Melbourne."""
+    """Google Places suggestions restricted to the Melbourne CBD (Epic 5,
+    US5.5: "only places inside the CBD are suggested" everywhere a location
+    search appears).
+
+    A hard locationRestriction, not a bias - Sprout only knows the trees inside
+    the CBD, so a result outside it is unusable. Google only takes a rectangle,
+    and the grid is rotated, so the request uses the outline's bounding box and
+    each prediction is then checked against the outline itself.
+    """
+    bounds = coverage_bounds()
     payload = {
         "input": query,
         "includedRegionCodes": ["au"],
         "languageCode": "en-AU",
-        "locationBias": {
-            "circle": {
-                "center": {"latitude": -37.8136, "longitude": 144.9631},
-                "radius": 50_000,
+        "locationRestriction": {
+            "rectangle": {
+                "low": {"latitude": bounds["south"], "longitude": bounds["west"]},
+                "high": {"latitude": bounds["north"], "longitude": bounds["east"]},
             }
         },
     }
@@ -260,13 +277,21 @@ def autocomplete_places(query: str = Query(min_length=2, max_length=120)) -> lis
         field_mask="suggestions.placePrediction.placeId,suggestions.placePrediction.text.text",
         json=payload,
     )
-    return [
-        PlaceSuggestion(
-            id=item["placePrediction"]["placeId"], label=item["placePrediction"]["text"]["text"]
-        )
-        for item in data.get("suggestions", [])
-        if "placePrediction" in item
-    ]
+    suggestions = []
+    for item in data.get("suggestions", []):
+        prediction = item.get("placePrediction")
+        if not prediction:
+            continue
+        # Restriction rectangles can still contain points outside the rotated
+        # grid. Resolve each prediction before exposing it to any search UI.
+        try:
+            place = place_details(prediction["placeId"])
+        except HTTPException as error:
+            if error.status_code in (404, 422):
+                continue
+            raise
+        suggestions.append(PlaceSuggestion(id=place.id, label=prediction["text"]["text"]))
+    return suggestions
 
 
 @router.get("/places/{place_id}", response_model=PlaceDetails)
@@ -277,11 +302,15 @@ def place_details(place_id: str) -> PlaceDetails:
         f"https://places.googleapis.com/v1/places/{place_id}",
         field_mask="id,displayName,location",
     )
-    location = data["location"]
+    location = data.get("location")
+    if not location:
+        raise HTTPException(status_code=404, detail="Place has no location.")
+    coordinates = Coordinates(lat=location["latitude"], lng=location["longitude"])
+    require_inside(coordinates.lat, coordinates.lng)
     return PlaceDetails(
         id=data["id"],
         label=data["displayName"]["text"],
-        coordinates=Coordinates(lat=location["latitude"], lng=location["longitude"]),
+        coordinates=coordinates,
     )
 
 
@@ -298,6 +327,9 @@ def plan_route(request: RouteRequest, session: SessionDep) -> RouteResult:
     choose between. What changed is that the choosing happens here instead of
     on screen.
     """
+    require_inside(request.origin.lat, request.origin.lng)
+    require_inside(request.destination.lat, request.destination.lng)
+
     if not settings.google_maps_api_key:
         raise HTTPException(status_code=503, detail="Google Routes API key is not configured.")
 
@@ -458,6 +490,7 @@ def _result(
         metrics=metrics,
         match=match,
         message=message,
+        denseZoneShare=corridor.dense_share if travel_mode == "WALK" else None,
     )
 
 
@@ -495,7 +528,7 @@ def _corridor(path: list[tuple[float, float]], session: SessionDep) -> Corridor:
     in — it is scored by the areas it passes through.
     """
     if not path:
-        return Corridor(trees=0, park=0, high_pollen=0, canopy=0)
+        return Corridor(trees=0, park=0, high_pollen=0, canopy=0, dense_share=0.0)
 
     corridor_path = _resample_path(path)
     boxes = _corridor_boxes(corridor_path)
@@ -549,10 +582,86 @@ def _corridor(path: list[tuple[float, float]], session: SessionDep) -> Corridor:
             if row.display_category in HIGH_POLLEN_GENERA or row.family in HIGH_POLLEN_FAMILIES
         ),
         canopy=round(100 * sum(row.canopy_rank for row in zones) / len(zones)) if zones else 0,
+        dense_share=_dense_zone_share(path, corridor_path, session),
     )
 
 
-def _corridor_boxes(path: list[tuple[float, float]]) -> list[dict[str, float]]:
+def _dense_zone_share(
+    path: list[tuple[float, float]],
+    corridor_path: list[tuple[float, float]],
+    session: SessionDep,
+) -> float:
+    """How much of the route's length runs through a Medium or High zone.
+
+    This is the THROUGH TREE-DENSE ZONES figure on the route card. It is a share
+    of distance walked, not of zones passed or trees counted near the path —
+    canopy already answers "how leafy are the areas nearby", and reusing it here
+    would put the same number on the card twice under two names.
+
+    Zones are fetched around the thinned corridor_path for the SQL, then every
+    distance sample is tested against the cells themselves.
+    """
+    samples = _samples_along(path, DENSE_SHARE_SAMPLE_M)
+    if not samples:
+        return 0.0
+
+    # A cell is a 0.001-degree square around its cluster_id, but the query can
+    # only filter on center_lat/center_lon, which are the mean of the cell's
+    # trees. Between a sample and that mean sit three gaps, each up to about
+    # GRID_HALF: sample to the middle of its cell, the middle to the tree mean,
+    # and the sample to the nearest thinned corridor point the box is built on.
+    # Padding by four of them leaves margin over all three together.
+    where, params = _corridor_where(
+        _corridor_boxes(corridor_path, padding=4 * GRID_HALF), "center_lat", "center_lon", "d"
+    )
+    rows = session.execute(
+        text(f"SELECT cluster_id FROM zones WHERE tree_count >= :dense_min AND ({where})"),
+        {**params, "dense_min": DENSITY_LOW},
+    ).all()
+    return _share_inside(samples, [_bounds(row.cluster_id) for row in rows])
+
+
+def _samples_along(path: list[tuple[float, float]], spacing_m: float) -> list[tuple[float, float]]:
+    """Points every spacing_m metres along the path, interpolated between vertices.
+
+    Google's vertices are not evenly spaced — they bunch up on bends and thin
+    out on straights — so testing the vertices themselves would weight a short
+    winding stretch over a long straight one. Sampling by distance makes each
+    point stand for the same length of walk.
+    """
+    if len(path) < 2:
+        return list(path)
+
+    samples: list[tuple[float, float]] = []
+    next_at = 0.0
+    walked = 0.0
+    for (a_lat, a_lng), (b_lat, b_lng) in zip(path, path[1:], strict=False):
+        segment = _distance_m(a_lat, a_lng, b_lat, b_lng)
+        if segment == 0:
+            continue
+        while next_at <= walked + segment:
+            t = (next_at - walked) / segment
+            samples.append((a_lat + t * (b_lat - a_lat), a_lng + t * (b_lng - a_lng)))
+            next_at += spacing_m
+        walked += segment
+    return samples
+
+
+def _share_inside(samples: list[tuple[float, float]], cells: list[Bounds]) -> float:
+    """Fraction of samples that fall inside any of the cells, to two places."""
+    if not samples:
+        return 0.0
+    inside = sum(
+        1
+        for lat, lng in samples
+        if any(c.south <= lat <= c.north and c.west <= lng <= c.east for c in cells)
+    )
+    return round(inside / len(samples), 2)
+
+
+def _corridor_boxes(
+    path: list[tuple[float, float]], padding: float = 0.001
+) -> list[dict[str, float]]:
     """A small box around each sampled path point, instead of one box for
     the whole route.
 
@@ -562,10 +671,17 @@ def _corridor_boxes(path: list[tuple[float, float]]) -> list[dict[str, float]]:
     Python) versus the low hundreds actually within 100m of the path. Many
     small boxes, OR'd together in SQL, let the database do that narrowing
     instead.
+
+    The default ~110m padding is a bit more than TREE_CORRIDOR_M; _near() then
+    trims to the exact distance.
     """
-    padding = 0.001  # ~110m: a bit more than TREE_CORRIDOR_M, trimmed exactly by _near()
     return [
-        {"south": lat - padding, "north": lat + padding, "west": lng - padding, "east": lng + padding}
+        {
+            "south": lat - padding,
+            "north": lat + padding,
+            "west": lng - padding,
+            "east": lng + padding,
+        }
         for lat, lng in path
     ]
 

@@ -113,28 +113,86 @@ park cards and the Green Spaces layer were cut for this iteration and
 replaced by zone cards. Epic 2's route endpoints are a separate module.
 """
 
-import re
-from datetime import date
-from math import asin, cos, radians, sin, sqrt
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel
-from sqlalchemy import bindparam, text
+from sqlalchemy import text
 
 from app.db import SessionDep
+from app.schemas.common import Coordinates as Coordinates
+from app.schemas.map_data import (
+    AreaMetrics as AreaMetrics,
+)
+from app.schemas.map_data import (
+    Bounds as Bounds,
+)
+from app.schemas.map_data import (
+    Density as Density,
+)
+from app.schemas.map_data import (
+    Genus as Genus,
+)
+from app.schemas.map_data import (
+    Precinct as Precinct,
+)
+from app.schemas.map_data import (
+    Tree as Tree,
+)
+from app.schemas.map_data import (
+    Zone as Zone,
+)
+from app.schemas.map_data import (
+    ZoneGenus as ZoneGenus,
+)
+from app.services.zone_data import (
+    DENSITY_HIGH as DENSITY_HIGH,
+)
+from app.services.zone_data import (
+    DENSITY_LOW as DENSITY_LOW,
+)
+from app.services.zone_data import (
+    HIGH_POLLEN_FAMILIES as HIGH_POLLEN_FAMILIES,
+)
+from app.services.zone_data import (
+    HIGH_POLLEN_GENERA as HIGH_POLLEN_GENERA,
+)
+from app.services.zone_data import (
+    OTHER as OTHER,
+)
+from app.services.zone_data import (
+    ZoneProfile as ZoneProfile,
+)
+from app.services.zone_data import (
+    _bounds as _bounds,
+)
+from app.services.zone_data import (
+    _data_notes as _data_notes,
+)
+from app.services.zone_data import (
+    _density as _density,
+)
+from app.services.zone_data import (
+    _distance_km as _distance_km,
+)
+from app.services.zone_data import (
+    _planting_age as _planting_age,
+)
+from app.services.zone_data import (
+    _profiles as _profiles,
+)
+from app.services.zone_data import (
+    _slug as _slug,
+)
+from app.services.zone_data import (
+    _zone as _zone,
+)
 
 router = APIRouter()
 
 # US1.2: the 25th and 75th percentiles of zones.tree_count.
-DENSITY_HIGH = 37
-DENSITY_LOW = 10
 
 # US1.3: cluster_id is the rounded centre of a 0.001-degree cell.
-GRID_HALF = 0.0005
 
-OTHER = "Other"
-GENERA_SHOWN = 3  # the recommendation card has room for three
 
 # US4.2 high-pollen proxy, specified by the team: five wind-pollinated genera,
 # plus two families that display_category cannot express.
@@ -151,202 +209,6 @@ GENERA_SHOWN = 3  # the recommendation card has room for three
 #
 # It is a proxy from species names, not pollen measurement, and the card says
 # so.
-HIGH_POLLEN_GENERA = ("Platanus", "Casuarina", "Allocasuarina", "Quercus", "Ulmus")
-HIGH_POLLEN_FAMILIES = ("Cupressaceae", "Oleaceae")
-
-EARTH_RADIUS_KM = 6371.0
-
-Density = Literal["High", "Medium", "Low"]
-
-
-def _density(tree_count: int) -> Density:
-    if tree_count > DENSITY_HIGH:
-        return "High"
-    if tree_count >= DENSITY_LOW:
-        return "Medium"
-    return "Low"
-
-
-def _slug(precinct: str) -> str:
-    """Precinct name to url-safe id. "North Melbourne" -> "north-melbourne"."""
-    return re.sub(r"[^a-z0-9]+", "-", precinct.lower()).strip("-")
-
-
-def _planting_age(year_planted: str | None) -> str:
-    """Planting year to the age chip the card shows.
-
-    A third of the trees record "Established (exact year unknown)" instead of
-    a year. Those get "Established" rather than an invented number.
-    """
-    if year_planted and year_planted.isdigit():
-        return f"~{date.today().year - int(year_planted)} yrs"
-    return "Established"
-
-
-def _distance_km(from_lat: float, from_lng: float, to_lat: float, to_lng: float) -> float:
-    """Great-circle distance, rounded to the 100m the cards display."""
-    d_lat = radians(to_lat - from_lat)
-    d_lng = radians(to_lng - from_lng)
-    a = sin(d_lat / 2) ** 2 + cos(radians(from_lat)) * cos(radians(to_lat)) * sin(d_lng / 2) ** 2
-    return round(2 * EARTH_RADIUS_KM * asin(sqrt(a)), 1)
-
-
-class Coordinates(BaseModel):
-    lat: float
-    lng: float
-
-
-class Bounds(BaseModel):
-    """The zone's grid cell, ready to hand to a map rectangle."""
-
-    north: float
-    south: float
-    east: float
-    west: float
-
-
-class Precinct(BaseModel):
-    """One entry in the search dropdown, and the US1.1 neighbourhood snapshot.
-
-    All four figures are counted through trees.precinct, as US1.1 specifies.
-    """
-
-    id: str
-    name: str
-    referencePoint: Coordinates
-    treeCount: int
-    zoneCount: int
-    speciesCount: int
-
-
-class Genus(BaseModel):
-    """One entry in the map filter panel. Replaces the hard-coded Figma list,
-    which offered Jacaranda (zero trees in the data) and omitted five genera
-    that hold thousands."""
-
-    genus: str
-    treeCount: int
-
-
-class ZoneGenus(BaseModel):
-    """One line of a card's tree breakdown. Named apart from Genus, which is
-    the filter-panel shape and uses the frontend's older field names."""
-
-    name: str
-    count: int
-
-
-class AreaMetrics(BaseModel):
-    """Scores out of 100, none of them a measurement.
-
-    canopy is a percentile within the precinct, not across the city: 85 means
-    this area holds more trees than 85% of the other zones in the same suburb.
-    It is the same tree_count behind the existing High/Medium/Low tiers, read
-    as a number rather than three buckets — so it says nothing about crown area,
-    which the dataset does not record.
-
-    Ranking per precinct rather than citywide is what makes it useful on a
-    card: the cards only ever compare areas inside one suburb, and a citywide
-    scale would leave every zone in a leafy precinct at the top and every zone
-    in a sparse one at the bottom.
-
-    parkShare is the share of trees standing in a park rather than on a street
-    — the only shade or noise signal the data carries.
-
-    lowAllergyShare and highPollenTrees come from a species-name proxy, not
-    pollen measurement, and the card labels them as such.
-    """
-
-    canopy: int
-    parkShare: int
-    lowAllergyShare: int | None = None
-    highPollenTrees: int | None = None
-
-
-class ZoneProfile:
-    """Per-zone tallies, assembled from the grouped rows.
-
-    "Other" is left out of the genus mix throughout. It covers 30,898 trees —
-    38% of the dataset — so it wins the count in most zones while telling the
-    reader nothing, and a card listing "Other, 58 trees" is worse than one
-    listing two real genera.
-    """
-
-    def __init__(self) -> None:
-        self.total = 0
-        self.park = 0
-        self.high_pollen = 0
-        self.genera: dict[str, int] = {}
-
-    def ranked(self) -> list[ZoneGenus]:
-        top = sorted(self.genera.items(), key=lambda item: (-item[1], item[0]))
-        return [ZoneGenus(name=name, count=count) for name, count in top[:GENERA_SHOWN]]
-
-    def dominant(self) -> str | None:
-        ranked = self.ranked()
-        return ranked[0].name if ranked else None
-
-    def metrics(self, canopy_percentile: int) -> AreaMetrics:
-        return AreaMetrics(
-            canopy=canopy_percentile,
-            parkShare=self._share(self.park),
-            lowAllergyShare=self._share(self.total - self.high_pollen),
-            highPollenTrees=self.high_pollen,
-        )
-
-    def _share(self, part: int) -> int:
-        return round(100 * part / self.total) if self.total else 0
-
-
-class Zone(BaseModel):
-    """A tree-dense area. center and treeCount are also what Epic 2 reads when
-    scoring candidate routes."""
-
-    id: str
-    precinctId: str
-    precinctName: str
-    center: Coordinates
-    bounds: Bounds
-    treeCount: int
-    density: Density
-    dominantGenus: str | None  # null when the zone holds nothing but "Other"
-    distanceKm: float
-    nearestStreet: str | None  # null when reverse geocoding found no nearby road
-    metrics: AreaMetrics
-    genera: list[ZoneGenus]
-    dataNotes: list[str]  # gaps the card shows rather than hides
-
-
-class Tree(BaseModel):
-    """One tree, as rendered on the map and in the detail popup."""
-
-    id: str  # trees.com_id, sent as a string to match the frontend type
-    precinctId: str
-    zoneId: str
-    coordinates: Coordinates
-    commonName: str
-    scientificName: str
-    family: str
-    genus: str
-    plantingAge: str
-    lifeExpectancy: str
-    locatedIn: Literal["Park", "Street"]
-
-
-def _bounds(cluster_id: str) -> Bounds:
-    """The 0.001-degree cell a cluster_id names.
-
-    Rounded to six decimals — a tenth of a metre, far finer than the grid —
-    because binary floats turn -37.795 - 0.0005 into -37.795500000000004, and
-    neighbouring cells drawn from unrounded edges can show a hairline seam.
-    """
-    lat, lng = (float(part) for part in cluster_id.split("_"))
-    return Bounds(
-        north=round(lat + GRID_HALF, 6),
-        south=round(lat - GRID_HALF, 6),
-        east=round(lng + GRID_HALF, 6),
-        west=round(lng - GRID_HALF, 6),
-    )
 
 
 def _resolve_precinct(session: SessionDep, value: str) -> str:
@@ -481,70 +343,6 @@ def list_zones(
     origin = _reference_point(session, name)
     profiles = _profiles({r.cluster_id for r in rows}, session)
     return [_zone(r, profiles.get(r.cluster_id, ZoneProfile()), origin) for r in rows]
-
-
-def _zone(row, profile: ZoneProfile, origin: Coordinates) -> Zone:
-    return Zone(
-        id=row.cluster_id,
-        precinctId=_slug(row.precinct),
-        precinctName=row.precinct,
-        center=Coordinates(lat=row.center_lat, lng=row.center_lon),
-        bounds=_bounds(row.cluster_id),
-        treeCount=row.tree_count,
-        density=_density(row.tree_count),
-        dominantGenus=profile.dominant(),
-        distanceKm=_distance_km(origin.lat, origin.lng, row.center_lat, row.center_lon),
-        nearestStreet=row.street_name,
-        metrics=profile.metrics(round(100 * row.canopy_rank)),
-        genera=profile.ranked(),
-        dataNotes=_data_notes(row.street_name),
-    )
-
-
-def _data_notes(street_name: str | None) -> list[str]:
-    """What this area cannot tell you, said out loud.
-
-    The design decision is explicit: a gap is flagged on the card, not hidden
-    and not filled with something invented. Both of these are real gaps today.
-    """
-    notes = ["Allergy data is not available yet."]
-    if street_name is None:
-        notes.insert(0, "No nearby street resolved; named by precinct.")
-    return notes
-
-
-def _profiles(zone_ids: set[str], session: SessionDep) -> dict[str, ZoneProfile]:
-    """Genus mix and park share for every zone in one query.
-
-    Grouping by category and location together means the genus breakdown, the
-    dominant genus and the park share all fall out of the same rows, instead of
-    a query per card.
-    """
-    rows = session.execute(
-        text(
-            """
-            SELECT cluster_id, display_category, family, located_in, COUNT(*) AS n
-            FROM trees
-            WHERE cluster_id IN :ids
-            GROUP BY cluster_id, display_category, family, located_in
-            """
-        ).bindparams(bindparam("ids", expanding=True)),
-        {"ids": list(zone_ids)},
-    ).all()
-
-    profiles: dict[str, ZoneProfile] = {}
-    for row in rows:
-        profile = profiles.setdefault(row.cluster_id, ZoneProfile())
-        profile.total += row.n
-        if row.located_in == "Park":
-            profile.park += row.n
-        if row.display_category in HIGH_POLLEN_GENERA or row.family in HIGH_POLLEN_FAMILIES:
-            profile.high_pollen += row.n
-        if row.display_category != OTHER:
-            profile.genera[row.display_category] = (
-                profile.genera.get(row.display_category, 0) + row.n
-            )
-    return profiles
 
 
 @router.get("/trees", response_model=list[Tree])

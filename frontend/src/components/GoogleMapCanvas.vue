@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import { importLibrary, setOptions } from '@googlemaps/js-api-loader'
 import { computed, onBeforeUnmount, onMounted, shallowRef, watch } from 'vue'
+import { distanceKm } from '@/services/discovery.service'
+
+// Tree zones this close to the destination are framed on the route view.
+const NEARBY_ZONE_KM = 0.5
 import type { Coordinates, DensityTier, RouteOption, TreeRecord, TreeZone } from '@/types/discovery'
 
 const props = defineProps<{
@@ -19,11 +23,22 @@ const props = defineProps<{
   // destination pin. Defaults to the existing behaviour for callers that
   // rely on it (MapView's search bar, the recommendation card thumbnail).
   autoCenter?: boolean
+  // Epic 5, US5.5: "a dashed line marks the CBD edge" on Sprout's map step.
+  // The real Hoddle Grid outline from GET /api/cbd/zones, not a rectangle.
+  cbdOutline?: Coordinates[]
+  // Epic 6: the live walk. Walked part is solid, the rest dashed.
+  walkedPath?: Coordinates[]
+  remainingPath?: Coordinates[]
+  // Epic 6: the user's live position, drawn as a blue dot.
+  userPosition?: Coordinates | null
+  // Epic 7: approved messages from other visitors, shown as pins.
+  messagePins?: { id: string; position: Coordinates; label: string }[]
 }>()
 
 const emit = defineEmits<{
   selectTree: [tree: TreeRecord]
   selectZone: [zone: TreeZone]
+  selectMessage: [id: string]
   error: [message: string]
 }>()
 
@@ -33,6 +48,11 @@ let markers: google.maps.marker.AdvancedMarkerElement[] = []
 let rectangles: google.maps.Rectangle[] = []
 let routeLines: google.maps.Polyline[] = []
 let endpointMarkers: google.maps.marker.AdvancedMarkerElement[] = []
+let cbdOutlineLine: google.maps.Polyline | null = null
+let walkLines: google.maps.Polyline[] = []
+let userMarker: google.maps.marker.AdvancedMarkerElement | null = null
+let messageMarkers: google.maps.marker.AdvancedMarkerElement[] = []
+let walkFitted = false
 let disposed = false
 
 const previewPoints = computed(() => {
@@ -78,6 +98,17 @@ const densityStyles: Record<DensityTier, { fillColor: string; fillOpacity: numbe
   High: { fillColor: '#006d2c', fillOpacity: 0.55 },
   Medium: { fillColor: '#31a354', fillOpacity: 0.45 },
   Low: { fillColor: '#a1d99b', fillOpacity: 0.4 },
+}
+
+/** Adds the tree zones close to the destination to a bounds, so the framing shows them. */
+function extendNearDestination(bounds: google.maps.LatLngBounds) {
+  if (!props.destination) return
+  const destination = props.destination
+  props.zones.forEach((zone) => {
+    if (distanceKm(destination, zone.center) > NEARBY_ZONE_KM) return
+    bounds.extend({ lat: zone.bounds.north, lng: zone.bounds.east })
+    bounds.extend({ lat: zone.bounds.south, lng: zone.bounds.west })
+  })
 }
 
 function clearMarkers() {
@@ -139,6 +170,28 @@ function renderZones() {
   })
 }
 
+function renderCbdOutline() {
+  cbdOutlineLine?.setMap(null)
+  cbdOutlineLine = null
+  if (!map.value || !props.cbdOutline?.length) return
+  // google.maps.Polygon's own stroke has no dashed option - a dashed line is
+  // a Polyline whose visible stroke is a repeating short-dash icon instead.
+  cbdOutlineLine = new google.maps.Polyline({
+    map: map.value,
+    path: props.cbdOutline,
+    clickable: false,
+    strokeOpacity: 0,
+    zIndex: 2,
+    icons: [
+      {
+        icon: { path: 'M 0,-1 0,1', strokeOpacity: 1, strokeColor: '#1f5a2c', scale: 3 },
+        offset: '0',
+        repeat: '14px',
+      },
+    ],
+  })
+}
+
 function renderRoutes() {
   if (!map.value) return
   clearRoutes()
@@ -162,8 +215,99 @@ function renderRoutes() {
         zIndex: 5,
       })
     })
+  // US5.6: frame the start, the destination and the tree zones around the
+  // destination, not only the line itself.
+  if (props.origin) routeBounds.extend(props.origin)
+  extendNearDestination(routeBounds)
   if (!routeBounds.isEmpty())
     map.value.fitBounds(routeBounds, { top: 230, bottom: 40, left: 35, right: 35 })
+}
+
+/** Epic 6: solid for the part already walked, dashed for the rest. */
+function renderWalk() {
+  walkLines.forEach((line) => line.setMap(null))
+  walkLines = []
+  if (!map.value) return
+  const walked = props.walkedPath ?? []
+  const remaining = props.remainingPath ?? []
+  if (walked.length > 1) {
+    walkLines.push(
+      new google.maps.Polyline({
+        map: map.value,
+        path: walked,
+        clickable: false,
+        strokeColor: '#247438',
+        strokeOpacity: 0.95,
+        strokeWeight: 6,
+        zIndex: 6,
+      }),
+    )
+  }
+  if (remaining.length > 1) {
+    walkLines.push(
+      new google.maps.Polyline({
+        map: map.value,
+        path: remaining,
+        clickable: false,
+        strokeOpacity: 0,
+        strokeColor: '#247438',
+        strokeWeight: 6,
+        icons: [
+          {
+            icon: { path: 'M 0,-1 0,1', strokeOpacity: 1, strokeColor: '#247438', scale: 3 },
+            offset: '0',
+            repeat: '14px',
+          },
+        ],
+        zIndex: 6,
+      }),
+    )
+  }
+  if (!walkFitted && walked.length + remaining.length > 1) {
+    walkFitted = true
+    const bounds = new google.maps.LatLngBounds()
+    ;[...walked, ...remaining].forEach((point) => bounds.extend(point))
+    extendNearDestination(bounds)
+    map.value.fitBounds(bounds, { top: 40, bottom: 40, left: 35, right: 35 })
+  }
+}
+
+async function renderUserDot() {
+  if (userMarker) userMarker.map = null
+  userMarker = null
+  if (!map.value || !props.userPosition) return
+  const { AdvancedMarkerElement } = (await importLibrary('marker')) as google.maps.MarkerLibrary
+  if (disposed || !props.userPosition) return
+  const content = document.createElement('span')
+  content.className = 'walk-user-dot'
+  content.title = 'You are here'
+  userMarker = new AdvancedMarkerElement({
+    map: map.value,
+    position: props.userPosition,
+    title: 'You are here',
+    content,
+  })
+}
+
+async function renderMessagePins() {
+  messageMarkers.forEach((marker) => {
+    marker.map = null
+  })
+  messageMarkers = []
+  if (!map.value || !props.messagePins?.length) return
+  const { AdvancedMarkerElement } = (await importLibrary('marker')) as google.maps.MarkerLibrary
+  if (disposed) return
+  for (const pin of props.messagePins) {
+    const content = document.createElement('button')
+    content.type = 'button'
+    content.className = 'care-pin'
+    content.title = pin.label
+    content.setAttribute('aria-label', pin.label)
+    content.addEventListener('click', () => emit('selectMessage', pin.id))
+    messageMarkers.push(
+      new AdvancedMarkerElement({ map: map.value, position: pin.position, title: pin.label, content }),
+    )
+  }
 }
 
 async function renderEndpoints() {
@@ -181,9 +325,15 @@ async function renderEndpoints() {
   ] as const) {
     if (!position) continue
     bounds.extend(position)
-    const content = document.createElement('span')
-    content.className =
-      title === 'Starting location' ? 'journey-origin-marker' : 'journey-destination-marker'
+    const isOrigin = title === 'Starting location'
+    const content = document.createElement('div')
+    content.className = 'journey-endpoint'
+    const dot = document.createElement('span')
+    dot.className = isOrigin ? 'journey-origin-marker' : 'journey-destination-marker'
+    const label = document.createElement('span')
+    label.className = isOrigin ? 'journey-endpoint-label origin' : 'journey-endpoint-label destination'
+    label.textContent = isOrigin ? 'Start' : 'End'
+    content.append(dot, label)
     // AdvancedMarkerElement's own `title` sets the accessible name but,
     // unlike the legacy Marker, doesn't show a hover tooltip - the DOM
     // element's native `title` attribute is what actually renders one.
@@ -283,8 +433,12 @@ onMounted(async () => {
 
     await renderMarkers()
     renderZones()
+    renderCbdOutline()
     renderRoutes()
+    renderWalk()
     await renderEndpoints()
+    await renderUserDot()
+    await renderMessagePins()
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown Google Maps error'
     emit('error', `Google Maps could not load: ${message}`)
@@ -300,16 +454,26 @@ watch(
 )
 watch(() => props.trees, renderMarkers, { deep: true })
 watch(() => props.zones, renderZones, { deep: true })
+watch(() => props.cbdOutline, renderCbdOutline, { deep: true })
 watch(() => [props.directionsOpen, props.routeOptions], renderRoutes, {
   deep: true,
 })
 watch(() => [props.origin, props.destination], renderEndpoints, { deep: true })
+watch(() => [props.walkedPath, props.remainingPath], renderWalk, { deep: true })
+watch(() => props.userPosition, renderUserDot, { deep: true })
+watch(() => props.messagePins, renderMessagePins, { deep: true })
 
 onBeforeUnmount(() => {
   disposed = true
   clearMarkers()
   clearRectangles()
   clearRoutes()
+  cbdOutlineLine?.setMap(null)
+  walkLines.forEach((line) => line.setMap(null))
+  if (userMarker) userMarker.map = null
+  messageMarkers.forEach((marker) => {
+    marker.map = null
+  })
   endpointMarkers.forEach((marker) => {
     marker.map = null
   })
@@ -416,6 +580,10 @@ onBeforeUnmount(() => {
   font: 10px/1.3 system-ui;
   padding: 3px 6px;
 }
+.journey-endpoint {
+  position: relative;
+  display: block;
+}
 .journey-origin-marker,
 .journey-destination-marker {
   display: block;
@@ -432,6 +600,50 @@ onBeforeUnmount(() => {
   border: 6px solid #226934;
   border-radius: 50% 50% 50% 0;
   transform: rotate(-45deg);
+}
+.journey-endpoint-label {
+  position: absolute;
+  left: 50%;
+  top: calc(100% + 5px);
+  transform: translateX(-50%);
+  white-space: nowrap;
+  font: 700 11px/1.3 'Figtree', system-ui, sans-serif;
+  background: white;
+  border-radius: 999px;
+  padding: 2px 9px;
+  box-shadow: 0 2px 6px #0003;
+}
+.journey-endpoint-label.origin {
+  color: #2a63a8;
+}
+.journey-endpoint-label.destination {
+  color: #1f5a2c;
+}
+/* Epic 6: the live blue dot. Plain global class, because the marker is created imperatively. */
+.walk-user-dot {
+  display: block;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #1a73e8;
+  border: 3px solid white;
+  box-shadow: 0 0 0 6px #1a73e833, 0 2px 6px #0004;
+}
+/* Epic 7: approved message pins from other visitors. */
+.care-pin {
+  width: 28px;
+  height: 28px;
+  border-radius: 50% 50% 50% 0;
+  transform: rotate(-45deg);
+  border: 3px solid #8a5a3b;
+  background: #fff7e6;
+  cursor: pointer;
+  box-shadow: 0 2px 5px #0003;
+}
+@media (prefers-reduced-motion: reduce) {
+  .care-pin {
+    transition: none;
+  }
 }
 
 .google-tree-marker {

@@ -3,6 +3,7 @@ import { defineStore } from 'pinia'
 import { emptyPreferences } from '@/types/personalisation'
 import type { Area, JourneyContext, PersonalisedRoute, TravelMode } from '@/types/personalisation'
 import type { Precinct, RoutePlace } from '@/types/discovery'
+import type { AreaOption, PlannedRoute } from '@/types/planning'
 import {
   coverageFrom,
   deviceLocation,
@@ -12,6 +13,7 @@ import {
   requestPersonalisedRoute,
   USE_MOCK_DATA,
 } from '@/services/personalisation.service'
+import { findAreas, growRoute } from '@/services/planning.service'
 import { preferenceChips } from '@/services/preferences'
 
 // Fixture destinations must not leak into a live-data session.
@@ -70,6 +72,62 @@ export const useJourneyStore = defineStore('journey', () => {
       : [],
   )
   const selectedArea = computed(() => areas.value.find((area) => area.id === destination.value?.id))
+
+  // Sprout's own route and areas (POST /api/sprout/route, POST /api/sprout/areas).
+  // Kept apart from `route`/`areas`/`recommendations` above, which still back the
+  // older Explore page on /api/routes - the two endpoints return different
+  // shapes, and a user can have both pages open in one session.
+  const sproutRoute = ref<PlannedRoute | null>(null)
+  const sproutRouteLoading = ref(false)
+  const sproutRouteError = ref<string | null>(null)
+  const sproutAreas = ref<AreaOption[]>([])
+  const sproutAreasLoading = ref(false)
+  const sproutAreasError = ref<string | null>(null)
+
+  /** Grows Sprout's route. The backend chooses the destination; this sets it from the response. */
+  async function growSproutRoute(): Promise<boolean> {
+    if (!startLocation.value) {
+      sproutRouteError.value = 'Choose a starting location first.'
+      return false
+    }
+    sproutRouteLoading.value = true
+    sproutRouteError.value = null
+    try {
+      const result = await growRoute(startLocation.value.coordinates, preferences.value)
+      sproutRoute.value = result
+      destination.value = {
+        id: result.destination.zoneId,
+        label: result.destination.label,
+        coordinates: result.destination.center,
+      }
+      return true
+    } catch (e) {
+      sproutRouteError.value = e instanceof Error ? e.message : 'The route could not be calculated.'
+      return false
+    } finally {
+      sproutRouteLoading.value = false
+    }
+  }
+
+  /** "See other options" / "Find more trees near you" - same ranking the route itself uses. */
+  async function findSproutAreas(
+    options: { excludedZoneIds?: string[]; limit?: number } = {},
+  ): Promise<AreaOption[]> {
+    if (!startLocation.value) return []
+    sproutAreasLoading.value = true
+    sproutAreasError.value = null
+    try {
+      const result = await findAreas(startLocation.value.coordinates, preferences.value, options)
+      sproutAreas.value = result.areas
+      return result.areas
+    } catch (e) {
+      sproutAreasError.value = e instanceof Error ? e.message : 'Areas could not be loaded.'
+      return []
+    } finally {
+      sproutAreasLoading.value = false
+    }
+  }
+
   const cache = new Map<string, PersonalisedRoute>()
   let sequence = 0
   let areaSequence = 0
@@ -212,11 +270,19 @@ export const useJourneyStore = defineStore('journey', () => {
     summary,
     recommendations,
     selectedArea,
+    sproutRoute,
+    sproutRouteLoading,
+    sproutRouteError,
+    sproutAreas,
+    sproutAreasLoading,
+    sproutAreasError,
     initialize,
     skipPersonalisation,
     useCurrentLocation,
     refreshAreas,
     calculate,
     findGreenerRoute,
+    growSproutRoute,
+    findSproutAreas,
   }
 })
