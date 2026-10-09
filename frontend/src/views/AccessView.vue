@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import LeafIcon from '@/components/LeafIcon.vue'
 import { apiPost, ApiError, setAccessToken } from '@/api/client'
 const password = ref('')
 const error = ref('')
@@ -46,12 +45,10 @@ onMounted(() => input.value?.focus())
 </script>
 <template>
   <main class="access-page">
-    <div class="access-brand">
-      <span><LeafIcon /></span>TouchGrass
-    </div>
+    <div class="access-brand"><img src="/touchgrass-mark.svg" alt="" />TouchGrass Melbourne</div>
     <section class="access-card">
       <span class="eyebrow">A little more green awaits</span>
-      <h1>Welcome to TouchGrass.</h1>
+      <h1>Welcome to TouchGrass Melbourne.</h1>
       <p>Enter the shared access password to step inside. No account needed.</p>
       <form @submit.prevent="unlock">
         <label for="access-password">Access password</label>
@@ -68,7 +65,7 @@ onMounted(() => input.value?.focus())
         />
         <p v-if="error" id="access-error" class="form-error" role="alert">{{ error }}</p>
         <button class="primary-button" :disabled="busy" type="submit">
-          {{ busy ? 'Checking…' : 'Enter TouchGrass →' }}
+          {{ busy ? 'Checking…' : 'Enter TouchGrass Melbourne →' }}
         </button>
       </form>
       <small>Access is remembered in this tab for up to one hour.</small>
@@ -97,17 +94,11 @@ onMounted(() => input.value?.focus())
     serif;
   margin-bottom: 30px;
 }
-.access-brand span {
-  display: grid;
-  place-items: center;
-  width: 38px;
-  height: 38px;
-  border-radius: 12px;
-  background: var(--tg-green-700);
-  color: white;
-}
-.access-brand svg {
-  width: 24px;
+.access-brand img {
+  width: 52px;
+  height: 52px;
+  object-fit: contain;
+  flex-shrink: 0;
 }
 .access-card {
   width: min(460px, 100%);
@@ -155,6 +146,10 @@ small {
   margin-top: 25px;
 }
 @media (max-width: 400px) {
+  .access-brand {
+    font-size: 1.15rem;
+    gap: 8px;
+  }
   .access-card {
     padding: 28px 22px;
   }
