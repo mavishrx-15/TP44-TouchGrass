@@ -948,14 +948,15 @@ h2 {
   font-size: 2rem;
   max-width: 560px;
 }
-.lead {
-  margin: -6px 0 14px;
-  font-size: 0.95rem;
-}
 .step-note {
   font-size: 0.82rem;
   color: #6b766a;
   margin: 8px 0 0;
+}
+.step-note.lead {
+  margin: 0 0 22px;
+  font-size: 0.95rem;
+  line-height: 1.5;
 }
 .mood-grid {
   display: grid;
