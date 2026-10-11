@@ -25,6 +25,10 @@
   flex-wrap: wrap;
 }
 .walk-step {
+  border: 0;
+  background: transparent;
+  font-family: inherit;
+  cursor: pointer;
   display: inline-flex;
   align-items: center;
   gap: 7px;
@@ -35,6 +39,16 @@
   line-height: 1.3;
   color: #16341c;
   white-space: nowrap;
+}
+.walk-step:disabled {
+  cursor: default;
+}
+.walk-step:not(:disabled):hover {
+  box-shadow: inset 0 0 0 1px #1f5a2c;
+}
+.walk-step:focus-visible {
+  outline: 2px solid #1f5a2c;
+  outline-offset: 2px;
 }
 .walk-step.active {
   background: #1f5a2c;

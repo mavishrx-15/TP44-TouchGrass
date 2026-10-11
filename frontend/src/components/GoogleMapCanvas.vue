@@ -31,6 +31,7 @@ const props = defineProps<{
   remainingPath?: Coordinates[]
   // Epic 6: the user's live position, drawn as a blue dot.
   userPosition?: Coordinates | null
+  ownPin?: Coordinates | null
   // Epic 7: approved messages from other visitors, shown as pins.
   messagePins?: {
     id: string
@@ -56,6 +57,7 @@ let endpointMarkers: google.maps.marker.AdvancedMarkerElement[] = []
 let cbdOutlineLine: google.maps.Polyline | null = null
 let walkLines: google.maps.Polyline[] = []
 let userMarker: google.maps.marker.AdvancedMarkerElement | null = null
+let ownPinMarker: google.maps.marker.AdvancedMarkerElement | null = null
 let messageMarkers: google.maps.marker.AdvancedMarkerElement[] = []
 let walkFitted = false
 let disposed = false
@@ -294,6 +296,19 @@ async function renderUserDot() {
   })
 }
 
+async function renderOwnPin() {
+  if (ownPinMarker) ownPinMarker.map = null
+  ownPinMarker = null
+  if (!map.value || !props.ownPin) return
+  const { AdvancedMarkerElement } = (await importLibrary('marker')) as google.maps.MarkerLibrary
+  if (disposed || !props.ownPin) return
+  ownPinMarker = new AdvancedMarkerElement({
+    map: map.value,
+    position: props.ownPin,
+    title: 'Your saved tree pin',
+  })
+}
+
 async function renderMessagePins() {
   messageMarkers.forEach((marker) => {
     marker.map = null
@@ -454,6 +469,7 @@ onMounted(async () => {
     renderWalk()
     await renderEndpoints()
     await renderUserDot()
+    await renderOwnPin()
     await renderMessagePins()
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown Google Maps error'
@@ -477,6 +493,7 @@ watch(() => [props.directionsOpen, props.routeOptions], renderRoutes, {
 watch(() => [props.origin, props.destination], renderEndpoints, { deep: true })
 watch(() => [props.walkedPath, props.remainingPath], renderWalk, { deep: true })
 watch(() => props.userPosition, renderUserDot, { deep: true })
+watch(() => props.ownPin, renderOwnPin, { deep: true })
 watch(() => props.messagePins, renderMessagePins, { deep: true })
 
 onBeforeUnmount(() => {
@@ -487,6 +504,7 @@ onBeforeUnmount(() => {
   cbdOutlineLine?.setMap(null)
   walkLines.forEach((line) => line.setMap(null))
   if (userMarker) userMarker.map = null
+  if (ownPinMarker) ownPinMarker.map = null
   messageMarkers.forEach((marker) => {
     marker.map = null
   })

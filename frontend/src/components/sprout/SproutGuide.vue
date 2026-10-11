@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { Clock, Headset, Location as LocationIcon, Warning } from '@element-plus/icons-vue'
 import SproutTree from '@/components/sprout/SproutTree.vue'
@@ -8,7 +8,6 @@ import LocationSearch from '@/components/LocationSearch.vue'
 import GoogleMapCanvas from '@/components/GoogleMapCanvas.vue'
 import { useJourneyStore } from '@/stores/journey'
 import { useSproutStore } from '@/stores/sprout'
-import { useAccessibilityStore } from '@/stores/accessibility'
 import { MELBOURNE_CENTER, loadAllZones } from '@/constants/zones'
 import { getCbdWeather, type CbdWeather } from '@/services/weather.service'
 import {
@@ -47,7 +46,6 @@ const STEP_LABELS: Record<SproutStep, string> = {
 
 const journey = useJourneyStore()
 const sprout = useSproutStore()
-const accessibility = useAccessibilityStore()
 const router = useRouter()
 
 const zones = ref<TreeZone[]>([])
@@ -263,14 +261,6 @@ function changeAnswers() {
 function startWalk() {
   router.push('/walk')
 }
-
-watch(
-  () => [locationError.value, zonesError.value, growError.value],
-  ([a, b, c]) => {
-    const message = a || b || c
-    if (message) accessibility.speak(message)
-  },
-)
 </script>
 
 <template>

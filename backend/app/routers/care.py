@@ -55,6 +55,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.config import settings
 from app.db import SessionDep
+from app.services.content_filter import is_unsafe_text
 
 router = APIRouter()
 
@@ -318,8 +319,8 @@ def create_message(
 ) -> CareMessage:
     """Post a message to a pinned tree (US7.3), or a damage report (US7.4).
 
-    Every message starts pending. Damage reports stay pending for the council
-    and are never published, whatever the review outcome.
+    Text must pass the community filter. Every message and damage report starts
+    pending and can only appear publicly after administrator approval.
     """
     pin = _load_pin(session, pin_id)
     _require_pin_owner(pin.device_id, payload.device_id)
@@ -329,6 +330,11 @@ def create_message(
     body = payload.body.strip()
     if not body:
         raise HTTPException(status_code=422, detail="Message cannot be empty.")
+    if is_unsafe_text(body):
+        raise HTTPException(
+            status_code=422,
+            detail="Please keep community messages respectful and free of adult content.",
+        )
     session.execute(
         text(
             """
@@ -407,6 +413,7 @@ def approved_messages(
             photo_data_url=row.photo_data,
         )
         for row in rows
+        if not is_unsafe_text(row.body)
     ]
 
 
@@ -418,6 +425,14 @@ def review_message(
     x_care_admin: Annotated[str | None, Header()] = None,
 ) -> CareMessage:
     _require_admin(x_care_admin)
+    if payload.status == "approved":
+        message = session.execute(
+            text("SELECT body FROM tree_messages WHERE id = :id"), {"id": message_id}
+        ).first()
+        if message is None:
+            raise HTTPException(status_code=404, detail="Message not found.")
+        if is_unsafe_text(message.body):
+            raise HTTPException(status_code=422, detail="This message failed the content filter.")
     result = session.execute(
         text("UPDATE tree_messages SET status = :status WHERE id = :id"),
         {"status": payload.status, "id": message_id},

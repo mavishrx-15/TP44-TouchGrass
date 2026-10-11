@@ -25,6 +25,9 @@ import {
   type CarePin,
 } from '@/services/care.service'
 import { WEAK_GPS_ACCURACY_M } from '@/services/walk'
+import type { Coordinates, TreeZone, TreeRecord } from '@/types/discovery'
+import { apiGet, ApiError } from '@/api/client'
+import { isUnsafeText, MESSAGE_CONTENT_WARNING } from '@/services/content-filter'
 import {
   downloadReport,
   downloadReportPhoto,
@@ -41,6 +44,9 @@ const props = defineProps<{
   zoneId: string | null
   /** The nearest street or landmark, used on the damage report. */
   landmark: string
+  area?: TreeZone | null
+  demo?: boolean
+  active?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -49,6 +55,7 @@ const emit = defineEmits<{
   // The walk screen shows these in Sprout's bubble and in the step bar.
   say: [text: string]
   stage: [stage: Stage]
+  pinned: [pin: CarePin]
 }>()
 
 const MAX_BODY = 500
@@ -57,6 +64,7 @@ type Stage = 'pin' | 'pinned' | 'photo' | 'message' | 'report' | 'posted'
 
 const stage = ref<Stage>('pin')
 const pin = ref<CarePin | null>(null)
+const pinSource = ref<'gps' | 'tree'>('gps')
 const pinning = ref(false)
 const pinError = ref('')
 const weakSignal = ref(false)
@@ -74,8 +82,32 @@ const posted = ref<{ id: string; kind: CareMessage['kind']; body: string; at: st
 const savedReport = ref<TreeReport | null>(null)
 const shareNote = ref('')
 const sharing = ref(false)
+const busy = computed(() => pinning.value || photoSaving.value || sending.value || sharing.value)
+
+function goToStep(step: 'pin' | 'message') {
+  if (busy.value) return
+  if (step === 'pin') stage.value = pin.value ? 'pinned' : 'pin'
+  else if (pin.value) stage.value = 'message'
+}
+
+defineExpose({ goToStep, busy })
+
+function isInArea(point: Coordinates): boolean {
+  const bounds = props.area?.bounds
+  return (
+    !bounds ||
+    (point.lat >= bounds.south &&
+      point.lat <= bounds.north &&
+      point.lng >= bounds.west &&
+      point.lng <= bounds.east)
+  )
+}
 
 const damageWord = computed(() => findDamageWord(body.value))
+const contentWarning = computed(() => (isUnsafeText(body.value) ? MESSAGE_CONTENT_WARNING : ''))
+watch(body, () => {
+  sendError.value = ''
+})
 
 /** Sprout's line for the current stage, shown by the walk screen. */
 const sproutSays = computed(() => {
@@ -105,13 +137,35 @@ function readPosition(): Promise<GeolocationPosition> {
   })
 }
 
-async function dropPin(allowWeak = false) {
+async function dropPin(allowWeak = false, randomTree = false) {
   if (pinning.value) return
   pinning.value = true
   pinError.value = ''
   try {
-    const fix = allowWeak && lastFix ? lastFix : await readPosition()
+    const bounds = props.area?.bounds
+    if (props.demo && !bounds) throw new Error('The area is still loading. Please try again.')
+    let fix: GeolocationPosition
+    const useTree = props.demo || randomTree
+    if (useTree) {
+      if (!props.zoneId) throw new Error('Select an area before pinning a tree.')
+      const trees = await apiGet<TreeRecord[]>(
+        `/api/trees?zoneId=${encodeURIComponent(props.zoneId)}&limit=1000`,
+      )
+      const candidates = trees.filter((tree) => isInArea(tree.coordinates))
+      const tree = candidates[Math.floor(Math.random() * candidates.length)]
+      if (!tree)
+        throw new Error('No trees were found in this area. Try your live location instead.')
+      fix = {
+        coords: { latitude: tree.coordinates.lat, longitude: tree.coordinates.lng, accuracy: 0 },
+      } as GeolocationPosition
+    } else fix = allowWeak && lastFix ? lastFix : await readPosition()
     lastFix = fix
+    if (!isInArea({ lat: fix.coords.latitude, lng: fix.coords.longitude })) {
+      weakSignal.value = false
+      throw new Error(
+        'Your location is outside this area. Move into the selected area and try again.',
+      )
+    }
     const accuracy = fix.coords.accuracy
     liveAccuracy.value = Math.round(accuracy)
     if (!allowWeak && accuracy > WEAK_GPS_ACCURACY_M) {
@@ -127,7 +181,9 @@ async function dropPin(allowWeak = false) {
       photoDataUrl: null,
     })
     pin.value = saved
+    pinSource.value = useTree ? 'tree' : 'gps'
     coordinates.value = { lat: saved.latitude, lng: saved.longitude }
+    emit('pinned', saved)
     stage.value = 'pinned'
     emit('face', 'excited')
   } catch (e) {
@@ -163,6 +219,7 @@ function addChip(text: string) {
 }
 
 function reviewOrPost() {
+  if (contentWarning.value) return
   if (!body.value.trim()) return
   if (damageWord.value) {
     stage.value = 'report'
@@ -173,6 +230,7 @@ function reviewOrPost() {
 }
 
 async function sendMessage(kind: CareMessage['kind']) {
+  if (contentWarning.value) return
   if (!pin.value || sending.value) return
   sending.value = true
   sendError.value = ''
@@ -206,7 +264,14 @@ async function sendMessage(kind: CareMessage['kind']) {
     body.value = ''
     stage.value = 'posted'
   } catch (e) {
-    sendError.value = friendlyError(e, 'The message could not be sent.')
+    const detail =
+      e instanceof ApiError ? (e.detail as { detail?: unknown } | undefined)?.detail : undefined
+    sendError.value =
+      e instanceof ApiError &&
+      e.status === 422 &&
+      detail === 'Please keep community messages respectful and free of adult content.'
+        ? MESSAGE_CONTENT_WARNING
+        : friendlyError(e, 'The message could not be sent.')
   } finally {
     sending.value = false
   }
@@ -255,12 +320,28 @@ function finish() {
       <span class="eyebrow">A LITTLE CONNECTION</span>
       <h2>Pin the tree you’re with</h2>
       <p class="pin-note">
-        Stand next to your tree. I’ll drop a pin at your live location, then you can snap a photo.
+        {{
+          demo
+            ? 'Demo: pin a randomly selected tree in this area, then try adding a photo or message.'
+            : 'Stand next to your tree. I’ll drop a pin at your live location, then you can snap a photo.'
+        }}
       </p>
       <button type="button" class="primary-button" :disabled="pinning" @click="dropPin()">
         <ElIcon><LocationIcon /></ElIcon
         >{{ pinning ? 'Finding your position…' : 'Drop a pin here' }}
       </button>
+      <button
+        v-if="!demo && area"
+        type="button"
+        class="ghost-button"
+        :disabled="pinning"
+        @click="dropPin(false, true)"
+      >
+        Pin a random tree in this area
+      </button>
+      <p v-if="!demo && area" class="pin-note">
+        Uses a tree’s recorded location in this area instead of your GPS.
+      </p>
       <div v-if="weakSignal" class="weak" role="alert">
         <p>
           <ElIcon><Warning /></ElIcon> {{ PIN_WARNING }} (accuracy about {{ liveAccuracy }} m)
@@ -296,7 +377,13 @@ function finish() {
       <details class="location-details">
         <summary>Location details</summary>
         <p class="coords">{{ pin.latitude.toFixed(5) }}, {{ pin.longitude.toFixed(5) }}</p>
-        <p class="accuracy">GPS accuracy: about {{ Math.round(pin.accuracyM) }} m.</p>
+        <p class="accuracy">
+          {{
+            pinSource === 'tree'
+              ? 'Recorded tree location inside this area.'
+              : `GPS accuracy: about ${Math.round(pin.accuracyM)} m.`
+          }}
+        </p>
       </details>
     </div>
 
@@ -319,11 +406,12 @@ function finish() {
         <p class="pin-note">Include the trunk and canopy if you can. A photo is optional.</p>
       </div>
       <CameraCapture
+        v-if="active !== false"
         :saving="photoSaving"
         @captured="onPhoto"
         @cancel="(skipPhoto) => (stage = skipPhoto || photoUrl ? 'message' : 'pinned')"
       />
-      <p v-if="photoSaving" class="pin-note" role="status">Saving your photo…</p>
+      <p v-if="photoSaving" class="pin-note" role="status">Checking and saving your photo…</p>
       <p v-if="photoError" class="form-error" role="alert">{{ photoError }}</p>
     </section>
 
@@ -339,9 +427,15 @@ function finish() {
           :maxlength="MAX_BODY"
           rows="4"
           placeholder="Say thanks, or tell us what you see"
-          aria-describedby="message-count"
+          :aria-invalid="!!contentWarning"
+          :aria-describedby="
+            contentWarning ? 'message-count message-content-warning' : 'message-count'
+          "
         />
         <span id="message-count" class="message-count">{{ body.length }} / {{ MAX_BODY }}</span>
+        <p v-if="contentWarning" id="message-content-warning" class="form-error" role="alert">
+          {{ contentWarning }}
+        </p>
         <div class="row chips-row">
           <button type="button" class="chip" @click="addChip(THANKS_CHIP)">
             + {{ THANKS_CHIP }}
@@ -362,7 +456,7 @@ function finish() {
           <button
             type="button"
             class="primary-button"
-            :disabled="!body.trim() || sending"
+            :disabled="!body.trim() || sending || !!contentWarning"
             @click="reviewOrPost"
           >
             {{ damageWord ? 'Review damage report' : 'Post message to this tree' }}
@@ -389,7 +483,7 @@ function finish() {
           <button
             type="button"
             class="primary-button"
-            :disabled="sending"
+            :disabled="sending || !!contentWarning"
             @click="sendMessage('damage_report')"
           >
             Save damage report{{ photoUrl ? ' with photo' : '' }}
@@ -397,7 +491,7 @@ function finish() {
           <button
             type="button"
             class="ghost-button"
-            :disabled="sending"
+            :disabled="sending || !!contentWarning"
             @click="sendMessage('message')"
           >
             Just post it as a message

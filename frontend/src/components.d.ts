@@ -11,7 +11,6 @@ export {}
 /* prettier-ignore */
 declare module 'vue' {
   export interface GlobalComponents {
-    BlindModeToggle: typeof import('./components/BlindModeToggle.vue')['default']
     CameraCapture: typeof import('./components/walk/CameraCapture.vue')['default']
     DemoNotice: typeof import('./components/DemoNotice.vue')['default']
     ElAutocomplete: typeof import('element-plus/es')['ElAutocomplete']

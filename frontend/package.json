@@ -16,7 +16,9 @@
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.2",
     "@googlemaps/js-api-loader": "^2.1.1",
+    "@tensorflow/tfjs": "^4.22.0",
     "element-plus": "^2.14.5",
+    "nsfwjs": "^4.4.0",
     "pinia": "^2.2.6",
     "vue": "^3.5.13",
     "vue-router": "^4.4.5"

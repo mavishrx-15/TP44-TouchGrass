@@ -6,6 +6,7 @@ import WalkView from '@/views/WalkView.vue'
 import GroundingSteps from '@/components/walk/GroundingSteps.vue'
 import PinTreeFlow from '@/components/walk/PinTreeFlow.vue'
 import StressCheckIn from '@/components/walk/StressCheckIn.vue'
+import GoogleMapCanvas from '@/components/GoogleMapCanvas.vue'
 import { useJourneyStore } from '@/stores/journey'
 import { findAreas, growRoute } from '@/services/planning.service'
 import { ApiError } from '@/api/client'
@@ -92,7 +93,7 @@ describe('continuing a finished walk', () => {
           VisitHistory: true,
           SproutLookPicker: true,
           GroundingSteps: true,
-          PinTreeFlow: true,
+          PinTreeFlow: { name: 'PinTreeFlow', template: '<div />', methods: { goToStep() {} } },
           StressCheckIn: true,
           ElIcon: true,
         },
@@ -110,8 +111,40 @@ describe('continuing a finished walk', () => {
       await flushPromises()
       wrapper.findComponent(GroundingSteps).vm.$emit('done')
       await flushPromises()
+      wrapper.findComponent(PinTreeFlow).vm.$emit('pinned', {
+        id: 'saved-tree',
+        latitude: -37.8102,
+        longitude: 144.9502,
+      })
+      await flushPromises()
+      expect(wrapper.findComponent(GoogleMapCanvas).props('ownPin')).toEqual({
+        lat: -37.8102,
+        lng: 144.9502,
+      })
       wrapper.findComponent(PinTreeFlow).vm.$emit('done')
       await flushPromises()
+      await wrapper
+        .findAll('.walk-step')
+        .find((button) => button.text().includes('Pin a tree'))!
+        .trigger('click')
+      await flushPromises()
+      expect(wrapper.get('.walk-step[aria-current="step"]').text()).toContain('Pin a tree')
+      await wrapper
+        .findAll('.walk-step')
+        .find((button) => button.text().includes('Check in'))!
+        .trigger('click')
+      await flushPromises()
+      expect(wrapper.get('.walk-step[aria-current="step"]').text()).toContain('Check in')
+      expect(wrapper.findComponent(GoogleMapCanvas).props('ownPin')).toEqual({
+        lat: -37.8102,
+        lng: 144.9502,
+      })
+      expect(
+        wrapper
+          .findAll('.walk-step')
+          .find((button) => button.text().includes('Rewards'))!
+          .attributes('disabled'),
+      ).toBeDefined()
       const checkin = wrapper.findComponent(StressCheckIn)
       checkin.vm.$emit('log', 'calm')
       checkin.vm.$emit('log', 'calm')

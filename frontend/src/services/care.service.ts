@@ -1,4 +1,5 @@
 import { apiGet, apiPost, apiPut, ApiError } from '@/api/client'
+import { requireSafePhoto } from '@/services/moderation'
 import {
   getDeviceId,
   getDeviceToken,
@@ -65,6 +66,7 @@ export async function createPin(input: {
   accuracyM: number
   photoDataUrl: string | null
 }): Promise<CarePin> {
+  if (input.photoDataUrl) await requireSafePhoto(input.photoDataUrl)
   const post = () =>
     apiPost<CarePin>(
       '/api/care/pins',
@@ -91,6 +93,7 @@ export async function createPin(input: {
 }
 
 export async function updatePinPhoto(pinId: string, photoDataUrl: string): Promise<CarePin> {
+  await requireSafePhoto(photoDataUrl)
   const result = await apiPut<CarePin>(
     `/api/care/pins/${encodeURIComponent(pinId)}/photo`,
     { photoDataUrl, deviceId: getDeviceId() },
@@ -114,6 +117,23 @@ export async function postMessage(
   return keepAnyIssuedToken(result)
 }
 
-export function getApprovedMessages(zoneId: string): Promise<PublicMessage[]> {
-  return apiGet<PublicMessage[]>(`/api/care/zones/${encodeURIComponent(zoneId)}/messages`)
+export async function getApprovedMessages(zoneId: string): Promise<PublicMessage[]> {
+  const messages = await apiGet<PublicMessage[]>(
+    `/api/care/zones/${encodeURIComponent(zoneId)}/messages`,
+  )
+  // Check before returning image URLs to the UI. Failed checks hide only the photo.
+  // Sequential classification keeps memory bounded on phones.
+  const checked: PublicMessage[] = []
+  for (const message of messages) {
+    let photoDataUrl = message.photoDataUrl
+    if (photoDataUrl) {
+      try {
+        await requireSafePhoto(photoDataUrl)
+      } catch {
+        photoDataUrl = null
+      }
+    }
+    checked.push({ ...message, photoDataUrl })
+  }
+  return checked
 }

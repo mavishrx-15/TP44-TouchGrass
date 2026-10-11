@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, expect, it, vi } from 'vitest'
+vi.mock('@/services/moderation', () => ({ requireSafePhoto: vi.fn(async () => {}) }))
 
 const input = {
   zoneId: null,

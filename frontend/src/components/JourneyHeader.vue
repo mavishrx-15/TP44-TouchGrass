@@ -1,6 +1,3 @@
-<script setup lang="ts">
-import BlindModeToggle from './BlindModeToggle.vue'
-</script>
 <template>
   <a class="skip-link" href="#main-content">Skip to main content</a>
   <header class="journey-header">
@@ -11,7 +8,7 @@ import BlindModeToggle from './BlindModeToggle.vue'
       ></RouterLink
     >
     <div class="header-actions">
-      <RouterLink class="rewards-link" to="/rewards">Leaf rewards</RouterLink><BlindModeToggle />
+      <RouterLink class="rewards-link" to="/rewards">Leaf rewards</RouterLink>
     </div>
   </header>
 </template>

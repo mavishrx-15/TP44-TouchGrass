@@ -12,7 +12,7 @@ import NearbyAreas from '@/components/rewards/NearbyAreas.vue'
 import SproutWardrobe from '@/components/rewards/SproutWardrobe.vue'
 import { SKIN_COST } from '@/data/sproutSkins'
 import { MELBOURNE_CENTER, getZoneFacts, loadAllZones, type ZoneFacts } from '@/constants/zones'
-import { getApprovedMessages, type PublicMessage } from '@/services/care.service'
+import { getApprovedMessages, type PublicMessage, type CarePin } from '@/services/care.service'
 import { decodePolyline } from '@/services/polyline'
 import { visitNumber } from '@/services/rewards.logic'
 import {
@@ -121,6 +121,9 @@ const WALK_STEPS = ['Walk', 'Arrive', 'Pin a tree', 'Message', 'Check in', 'Rewa
 /** What the pin-and-message flow is showing, reported by PinTreeFlow. */
 const pinSay = ref('')
 const pinStage = ref('pin')
+const pinFlow = ref<InstanceType<typeof PinTreeFlow> | null>(null)
+const ownPin = ref<CarePin | null>(null)
+const furthestStep = ref(0)
 
 const walkStepIndex = computed(() => {
   if (phase.value === 'grounding') return 1
@@ -132,8 +135,34 @@ const walkStepIndex = computed(() => {
   return 0
 })
 
-watch([phase, pinStage], async () => {
-  mobileMapOpen.value = false
+watch(walkStepIndex, (index) => {
+  furthestStep.value = Math.max(furthestStep.value, index)
+})
+
+function navigateStep(index: number) {
+  if (index > furthestStep.value || pinFlow.value?.busy || phase.value === 'ended') return
+  sproutOverride.value = null
+  sproutFaceOverride.value = null
+  if (index === 0) {
+    stopTracking()
+    frozen.value = progress.value
+    paused.value = true
+    phase.value = 'walking'
+  } else if (index === 1) phase.value = 'grounding'
+  else if (index === 2 || index === 3) {
+    phase.value = 'pin'
+    pinFlow.value?.goToStep(index === 2 ? 'pin' : 'message')
+  } else if (index === 4) phase.value = 'checkin'
+  else if (index === 5) phase.value = 'summary'
+}
+
+function onOwnPin(pin: CarePin) {
+  ownPin.value = pin
+  mobileMapOpen.value = true
+}
+
+watch([phase, pinStage], async ([nextPhase], [previousPhase]) => {
+  if (nextPhase !== previousPhase) mobileMapOpen.value = false
   await nextTick()
   if (panelElement.value) panelElement.value.scrollTop = 0
   panelElement.value?.focus({ preventScroll: true })
@@ -633,6 +662,9 @@ async function chooseArea(area: AreaOption) {
   sproutOverride.value = null
   destinationFacts.value = null
   phase.value = 'intro'
+  ownPin.value = null
+  furthestStep.value = 0
+  pinStage.value = 'pin'
   summaryText.value = ''
   tips.value = []
   shownKeys.clear()
@@ -670,7 +702,10 @@ onBeforeUnmount(() => {
 })
 
 const arrivalCenter = computed(() => journey.destination?.coordinates ?? MELBOURNE_CENTER)
-const mapCenterAuto = computed(() => phase.value === 'grounding')
+const mapCenterAuto = computed(() => afterArrival.value)
+const mapCenter = computed(() =>
+  ownPin.value ? { lat: ownPin.value.latitude, lng: ownPin.value.longitude } : arrivalCenter.value,
+)
 </script>
 
 <template>
@@ -680,11 +715,14 @@ const mapCenterAuto = computed(() => phase.value === 'grounding')
   >
     <header class="walk-header">
       <nav class="walk-steps" aria-label="Walk steps">
-        <span
+        <button
           v-for="(item, index) in WALK_STEPS"
           :key="item"
           class="walk-step"
-          :class="{ done: index < walkStepIndex, active: index === walkStepIndex }"
+          type="button"
+          :disabled="index > furthestStep || !!pinFlow?.busy || phase === 'ended'"
+          @click="navigateStep(index)"
+          :class="{ done: index < furthestStep, active: index === walkStepIndex }"
           :aria-current="index === walkStepIndex ? 'step' : undefined"
           :aria-label="`${item}${index < walkStepIndex ? ', completed' : ''}`"
         >
@@ -693,7 +731,7 @@ const mapCenterAuto = computed(() => phase.value === 'grounding')
             <template v-else>{{ index + 1 }}</template>
           </span>
           <span class="step-name">{{ item }}</span>
-        </span>
+        </button>
       </nav>
       <span v-if="!afterArrival" class="live-label" :class="gps">{{ gpsLabel }}</span>
       <button
@@ -735,7 +773,7 @@ const mapCenterAuto = computed(() => phase.value === 'grounding')
       <section class="map-column" aria-label="Walk map">
         <div class="walk-map">
           <GoogleMapCanvas
-            :center="mapCenterAuto ? arrivalCenter : MELBOURNE_CENTER"
+            :center="mapCenterAuto ? mapCenter : MELBOURNE_CENTER"
             :trees="[]"
             :zones="zones"
             :directions-open="false"
@@ -746,6 +784,7 @@ const mapCenterAuto = computed(() => phase.value === 'grounding')
             :remaining-path="remainingPath"
             :user-position="gps === 'on' ? position : null"
             :message-pins="messagePins"
+            :own-pin="ownPin ? { lat: ownPin.latitude, lng: ownPin.longitude } : null"
             :auto-center="mapCenterAuto"
             @select-message="onMessagePin"
           />
@@ -958,18 +997,6 @@ const mapCenterAuto = computed(() => phase.value === 'grounding')
           </div>
         </template>
 
-        <!-- Epic 7: pin, photo, message -->
-        <template v-else-if="phase === 'pin'">
-          <PinTreeFlow
-            :zone-id="zoneId"
-            :landmark="destinationZone?.nearestStreet ?? journey.destination?.label ?? 'this area'"
-            @face="(f) => (sproutFaceOverride = f)"
-            @say="(text) => (pinSay = text)"
-            @stage="(next) => (pinStage = next)"
-            @done="toCheckIn"
-          />
-        </template>
-
         <!-- Epic 6 check-in, Epic 8 rewards -->
         <template v-else-if="phase === 'checkin'">
           <StressCheckIn :before="sprout.mood" @log="logVisit" />
@@ -1020,6 +1047,22 @@ const mapCenterAuto = computed(() => phase.value === 'grounding')
           </article>
           <button type="button" class="primary-button" @click="visitAnother">Back to Sprout</button>
         </template>
+        <PinTreeFlow
+          v-if="furthestStep >= 2"
+          v-show="phase === 'pin'"
+          :key="zoneId ?? 'unassigned'"
+          ref="pinFlow"
+          :zone-id="zoneId"
+          :area="destinationZone"
+          :demo="demoMode"
+          :active="phase === 'pin'"
+          :landmark="destinationZone?.nearestStreet ?? journey.destination?.label ?? 'this area'"
+          @pinned="onOwnPin"
+          @face="(f) => (sproutFaceOverride = f)"
+          @say="(text) => (pinSay = text)"
+          @stage="(next) => (pinStage = next)"
+          @done="toCheckIn"
+        />
       </section>
     </div>
   </div>
