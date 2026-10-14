@@ -1,11 +1,13 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import { getAccessToken, watchAccessExpiry } from '@/api/client'
+// Temporarily disabled access gate. Restore with the guard below.
+// import { getAccessToken, watchAccessExpiry } from '@/api/client'
 import HomeView from '@/views/HomeView.vue'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
-    { path: '/access', name: 'access', component: () => import('@/views/AccessView.vue') },
+    // { path: '/access', name: 'access', component: () => import('@/views/AccessView.vue') },
+    { path: '/access', redirect: '/' },
     { path: '/', name: 'home', component: HomeView },
     { path: '/walk', name: 'walk', component: () => import('@/views/WalkView.vue') },
     { path: '/rewards', name: 'rewards', component: () => import('@/views/RewardsView.vue') },
@@ -18,6 +20,7 @@ const router = createRouter({
   },
 })
 
+/* Temporarily disabled: shared-password gate and expiry redirects.
 router.beforeEach((to) => {
   const unlocked = !!getAccessToken()
   if (to.name !== 'access' && !unlocked)
@@ -30,5 +33,6 @@ window.addEventListener('access-expired', () => {
   }
 })
 watchAccessExpiry()
+*/
 
 export default router

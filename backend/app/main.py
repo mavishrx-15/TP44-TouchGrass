@@ -1,4 +1,5 @@
-from fastapi import Depends, FastAPI
+from fastapi import FastAPI
+# from fastapi import Depends
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
@@ -14,7 +15,8 @@ from app.routers import (
     sprout_routes,
     weather,
 )
-from app.security import require_access_token
+# Temporarily disabled shared-password gate; restore these imports and dependencies together.
+# from app.security import require_access_token
 
 app = FastAPI(title="TouchGrass API", version="0.1.0")
 
@@ -32,7 +34,7 @@ def health() -> dict[str, str]:
     return {"status": "ok", "service": "touchgrass-api"}
 
 
-@app.get("/api/db-check", dependencies=[Depends(require_access_token)])
+@app.get("/api/db-check")  # dependencies=[Depends(require_access_token)]
 def db_check(session: SessionDep) -> dict[str, object]:
     """Proves the API can reach the database, without going through a query.
 
@@ -53,4 +55,4 @@ for feature, prefix in (
     (weather.router, "/api/weather"),
     (care.router, "/api/care"),
 ):
-    app.include_router(feature, prefix=prefix, dependencies=[Depends(require_access_token)])
+    app.include_router(feature, prefix=prefix)  # dependencies=[Depends(require_access_token)]
