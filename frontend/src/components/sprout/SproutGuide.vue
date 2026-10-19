@@ -915,11 +915,29 @@ h2 {
   margin-bottom: 4px;
   min-height: 40px;
 }
-.sprout-stage.sky-sunny {
-  background: #fbf0d4;
+/* Soft sky glow behind Sprout: fades into the page instead of a hard panel */
+.sprout-stage::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.6s ease;
 }
-.sprout-stage.sky-cool {
-  background: #e7f1f4;
+.sprout-stage.sky-sunny::before,
+.sprout-stage.sky-cool::before {
+  opacity: 1;
+}
+.sprout-stage.sky-sunny::before {
+  background:
+    radial-gradient(circle at 60px 60px, #fbe3a6cc 0, #fbeccb80 22%, transparent 55%),
+    radial-gradient(ellipse 70% 45% at 50% 78%, #fbefd466 0, transparent 70%);
+}
+.sprout-stage.sky-cool::before {
+  background:
+    radial-gradient(ellipse 80% 55% at 50% 30%, #dcebef99 0, transparent 70%),
+    radial-gradient(ellipse 45% 22% at 50% 88%, #b9d3c466 0, transparent 75%);
 }
 .sprout-panel {
   position: relative;
